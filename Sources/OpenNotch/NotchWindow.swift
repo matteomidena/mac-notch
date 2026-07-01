@@ -27,6 +27,8 @@ final class NotchController: NSObject {
     private var trackingArea: NSTrackingArea?
     private var pendingHoverOut: DispatchWorkItem?
     private var pendingShrink: DispatchWorkItem?
+    private var coveredByFullscreen = false
+    private var fullscreenPoll: Timer?
 
     init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
         self.nowPlaying = nowPlaying
@@ -70,8 +72,8 @@ final class NotchController: NSObject {
         model.showAmbient = (nowPlaying.current != nil)
         panel.setFrame(collapsedFrame(), display: false)
         installTrackingArea()
-        observeFullscreenNotifications()
         observePlayback()
+        observeFullscreen()
     }
 
     func show() {
@@ -200,26 +202,59 @@ final class NotchController: NSObject {
 
     // MARK: - Fullscreen tracking
 
-    private func observeFullscreenNotifications() {
-        // ponytail: NSWorkspace.activeSpaceDidChangeNotification fires on any Space
-        // switch, not just fullscreen apps. NSWindow.didEnter/ExitFullScreen are the
-        // precise per-app signals; that's what we key phase transitions off of.
-        NotificationCenter.default.addObserver(self,
-                                                selector: #selector(handleEnterFullscreen),
-                                                name: NSWindow.didEnterFullScreenNotification,
-                                                object: nil)
-        NotificationCenter.default.addObserver(self,
-                                                selector: #selector(handleExitFullscreen),
-                                                name: NSWindow.didExitFullScreenNotification,
-                                                object: nil)
+    private func observeFullscreen() {
+        // NSWindow.didEnter/ExitFullScreenNotification only fire for our OWN
+        // windows, which never go fullscreen — useless here. Native fullscreen
+        // fires activeSpaceDidChange, but Chromium in-window video fullscreen
+        // (a YouTube video) changes nothing observable — so poll the window list.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(evaluateFullscreen),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil)
+        // ponytail: 1s poll of the window list — the only mechanism that catches
+        // in-window video fullscreen (no notification fires). Cheap; raise the
+        // cadence if hide-on-fullscreen feels laggy.
+        let poll = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.evaluateFullscreen() }
+        }
+        RunLoop.main.add(poll, forMode: .common)
+        fullscreenPoll = poll
+        evaluateFullscreen()   // initial state (e.g. launched into a fullscreen space)
     }
 
-    @objc private func handleEnterFullscreen() {
-        transition(.enterFullscreen)
+    /// Snapshot the on-screen windows and edge-trigger hide/show.
+    @objc private func evaluateFullscreen() {
+        let covered = FullscreenDetector.coversNotch(currentWindows(),
+                                                     mainDisplayFrame: mainDisplayFrameCG())
+        guard covered != coveredByFullscreen else { return }
+        coveredByFullscreen = covered
+        transition(covered ? .enterFullscreen : .exitFullscreen)
     }
 
-    @objc private func handleExitFullscreen() {
-        transition(.exitFullscreen)
+    /// Main display frame in CoreGraphics (top-left origin) coordinates, matching
+    /// the window bounds returned by CGWindowListCopyWindowInfo.
+    private func mainDisplayFrameCG() -> CGRect {
+        guard let size = NSScreen.main?.frame.size else { return .zero }
+        return CGRect(origin: .zero, size: size)
+    }
+
+    private func currentWindows() -> [WindowSnapshot] {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return infos.compactMap { info in
+            // Only normal-layer windows (layer 0); skip menubar/dock/status items.
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
+                return nil
+            }
+            let pid = info[kCGWindowOwnerPID as String] as? pid_t
+            return WindowSnapshot(frame: bounds, isOwnApp: pid == ownPID)
+        }
     }
 
     // MARK: - State machine
