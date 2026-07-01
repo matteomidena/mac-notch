@@ -13,7 +13,7 @@
 - **Platform:** macOS 14.0+ (`// swift-tools-version:6.0`, `platforms: [.macOS(.v14)]`).
 - **The media plugin gets zero privileges.** `MediaPlugin` and `NowPlayingView` live in code that has NO access to `MediaRemote` or host internals — only the public `PluginHost` / `NowPlayingService`. Enforced by the keystone test (Task 9): it compiles against public API only.
 - **Logic core is pure.** `OpenNotchKit` imports no AppKit/SwiftUI-window APIs (SwiftUI `View` types are allowed for widget content; window/NSPanel/MediaRemote are not). It must build and test on its own via `swift test`.
-- **No new third-party Swift dependencies.** Use stdlib + system frameworks. The perl adapter is vendored, not a SwiftPM dep.
+- **No new third-party Swift dependencies.** Use stdlib + system frameworks. The perl adapter is vendored, not a SwiftPM dep. **One accepted exception (Task 2):** Apple's official `swift-testing` package is declared as a dependency because this machine is CommandLineTools-only (no full Xcode), which ships neither a SwiftPM-resolvable `XCTest` nor a complete bundled `Testing` module. Both `import Testing` (without the package) and `import XCTest` fail here. This is Apple's own testing framework, not third-party; if full Xcode is later installed, the dependency can be dropped and tests will resolve `Testing`/`XCTest` from the toolchain. Tests use Swift Testing (`@Test` / `#expect`).
 - **TDD for the logic core; manual verification for window/rendering.** Tasks 3–9 are test-first. Tasks 10–12 are build + documented manual checklist (rendering can't be unit-tested sensibly).
 - **Naming:** package/product/repo use `OpenNotch`; library target `OpenNotchKit`. Plugin ids are reverse-DNS (`cafe.notch.*`).
 
