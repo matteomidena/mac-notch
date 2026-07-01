@@ -10,7 +10,7 @@ final class NotchWindow: NSPanel {
 }
 
 @MainActor
-final class NotchController {
+final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
     private let expandedSize = CGSize(width: 420, height: 160)
@@ -41,6 +41,8 @@ final class NotchController {
         panel.hasShadow = false
         panel.contentView = hostingView
         panel.ignoresMouseEvents = false
+
+        super.init()
 
         applyFrame(for: stateMachine.phase, animated: false)
         installTrackingArea()
@@ -117,13 +119,15 @@ final class NotchController {
         trackingArea = area
     }
 
-    func mouseEntered(with event: NSEvent) {
+    // Explicit ObjC selectors: NSTrackingArea sends `mouseEntered:`/`mouseExited:`
+    // to its owner. Swift would otherwise mangle these to `mouseEnteredWith:`.
+    @objc(mouseEntered:) func mouseEntered(with event: NSEvent) {
         pendingHoverOut?.cancel()
         pendingHoverOut = nil
         transition(.hoverIn)
     }
 
-    func mouseExited(with event: NSEvent) {
+    @objc(mouseExited:) func mouseExited(with event: NSEvent) {
         let workItem = DispatchWorkItem { [weak self] in
             self?.transition(.hoverOut)
         }
