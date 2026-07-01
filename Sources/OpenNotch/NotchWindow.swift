@@ -18,17 +18,19 @@ final class NotchController: NSObject {
 
     private let panel: NotchWindow
     private let hostingView: NSHostingView<NotchShell>
+    private let model: NotchViewModel
     private var stateMachine = NotchStateMachine()
     private var trackingArea: NSTrackingArea?
     private var pendingHoverOut: DispatchWorkItem?
-    private var widgets: [PluginWidget]
+    private var pendingShrink: DispatchWorkItem?
 
     init(widgets: [PluginWidget] = []) {
-        self.widgets = widgets
+        model = NotchViewModel(widgets: widgets)
 
         let initialFrame = CGRect(origin: .zero, size: fallbackPillSize)
-        hostingView = NSHostingView(rootView: NotchShell(phase: .collapsed, widgets: widgets))
+        hostingView = NSHostingView(rootView: NotchShell(model: model))
         hostingView.frame = initialFrame
+        hostingView.autoresizingMask = [.width, .height]  // track the window during resize
 
         panel = NotchWindow(contentRect: initialFrame,
                              styleMask: [.borderless, .nonactivatingPanel],
@@ -44,7 +46,7 @@ final class NotchController: NSObject {
 
         super.init()
 
-        applyFrame(for: stateMachine.phase, animated: false)
+        panel.setFrame(anchorRect(), display: false)
         installTrackingArea()
         observeFullscreenNotifications()
     }
@@ -58,8 +60,7 @@ final class NotchController: NSObject {
     }
 
     func updateWidgets(_ widgets: [PluginWidget]) {
-        self.widgets = widgets
-        hostingView.rootView = NotchShell(phase: stateMachine.phase, widgets: widgets)
+        model.widgets = widgets
     }
 
     // MARK: - Geometry
@@ -82,25 +83,35 @@ final class NotchController: NSObject {
         return CGRect(origin: origin, size: expandedSize)
     }
 
-    private func frame(for phase: NotchPhase) -> CGRect {
-        switch phase {
-        case .collapsed, .hidden:
-            return anchorRect()
-        case .expanded:
-            return expandedRect()
-        }
-    }
-
     private func applyFrame(for phase: NotchPhase, animated: Bool) {
-        let targetFrame = frame(for: phase)
-        panel.setFrame(targetFrame, display: true, animate: animated)
-        hostingView.rootView = NotchShell(phase: phase, widgets: widgets)
-
+        pendingShrink?.cancel(); pendingShrink = nil
         switch phase {
         case .hidden:
+            model.phase = .hidden
             panel.orderOut(nil)
-        case .collapsed, .expanded:
+        case .expanded:
+            // Grow the window to the full canvas BEFORE the spring so the
+            // expanding panel is never clipped, then animate it open.
+            panel.setFrame(expandedRect(), display: true)
             panel.orderFrontRegardless()
+            model.phase = .expanded
+        case .collapsed:
+            panel.orderFrontRegardless()
+            model.phase = .collapsed
+            // Keep the full canvas during the close animation, then shrink the
+            // window to the notch footprint so it doesn't block the menu bar.
+            let anchor = anchorRect()
+            if animated {
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, self.stateMachine.phase == .collapsed else { return }
+                    self.panel.setFrame(anchor, display: true)
+                }
+                pendingShrink = work
+                // Longer than the bouncy settle time so the close isn't clipped.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65, execute: work)
+            } else {
+                panel.setFrame(anchor, display: true)
+            }
         }
     }
 
