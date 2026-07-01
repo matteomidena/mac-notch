@@ -35,7 +35,40 @@ struct NotchPanelShape: Shape {
 @Observable @MainActor final class NotchViewModel {
     var phase: NotchPhase = .collapsed
     var widgets: [PluginWidget]
+    var topInset: CGFloat = 32          // menubar/notch height reserved at the top
     init(widgets: [PluginWidget]) { self.widgets = widgets }
+}
+
+/// Placeholder shortcuts column (right side of the expanded panel). These are
+/// visual stand-ins for future plugin-contributed quick actions, not working
+/// features. ponytail: replace with real plugin widgets when the compact/quick-
+/// action API lands.
+private struct QuickActionsPlaceholder: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(spacing: 8) {
+                pill("Spotify")
+                pill("Shortcut")
+            }
+            VStack(spacing: 4) {
+                Image(systemName: "video.fill").font(.system(size: 16))
+                Text("Mirror").font(.system(size: 10))
+            }
+            .foregroundStyle(.white.opacity(0.85))
+            .frame(width: 66, height: 66)
+            .background(.white.opacity(0.08), in: Circle())
+        }
+    }
+    private func pill(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles").foregroundStyle(.yellow).font(.system(size: 11))
+            Text(title).foregroundStyle(.white).font(.system(size: 12, weight: .medium))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(width: 116)
+        .background(.white.opacity(0.08), in: Capsule())
+    }
 }
 
 struct NotchShell: View {
@@ -44,10 +77,19 @@ struct NotchShell: View {
         ZStack(alignment: .top) {
             Color.clear                                  // fill the (fixed-size) window canvas
             if model.phase == .expanded {
-                HStack(spacing: 16) { ForEach(model.widgets) { $0.content } }
-                    .padding(16)
-                    .background(.black, in: NotchPanelShape())   // hardware-notch silhouette
-                    .transition(.scale(scale: 0.8, anchor: .top).combined(with: .opacity))
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: model.topInset)     // reserve the notch/menubar strip
+                    HStack(alignment: .center, spacing: 14) {
+                        ForEach(model.widgets) { $0.content }      // player (left)
+                        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
+                        QuickActionsPlaceholder()                  // shortcuts (right)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
+                    .padding(.top, 4)
+                }
+                .background(.black, in: NotchPanelShape())         // hardware-notch silhouette
+                .transition(.scale(scale: 0.85, anchor: .top).combined(with: .opacity))
             } else {
                 NotchPanelShape(topRadius: 6, bottomRadius: 12)
                     .fill(.black)

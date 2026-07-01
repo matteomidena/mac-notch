@@ -13,7 +13,7 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 420, height: 160)
+    private let expandedSize = CGSize(width: 540, height: 168)
     private let hoverOutGrace: TimeInterval = 0.2
 
     private let panel: NotchWindow
@@ -45,6 +45,10 @@ final class NotchController: NSObject {
         panel.ignoresMouseEvents = false
 
         super.init()
+
+        // Reserve the real notch height (menubar height when there's no notch) so
+        // the expanded content hangs below the notch, not over it.
+        if let inset = NSScreen.main?.safeAreaInsets.top, inset > 0 { model.topInset = inset }
 
         panel.setFrame(anchorRect(), display: false)
         installTrackingArea()
