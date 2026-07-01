@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 public struct PluginManifest: Equatable, Sendable {
     public let id: String
@@ -26,7 +27,9 @@ public struct PluginWidget: Identifiable {
     }
 }
 
-@MainActor public protocol NowPlayingService: AnyObject {
+// `Observable` conformance is required so SwiftUI re-renders widgets when
+// now-playing state changes. Conformers must be `@Observable`.
+@MainActor public protocol NowPlayingService: AnyObject, Observable {
     var current: NowPlayingInfo? { get }
     func play(); func pause(); func toggle()
     func next(); func previous()

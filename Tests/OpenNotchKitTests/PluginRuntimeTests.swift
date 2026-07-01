@@ -3,9 +3,9 @@ import SwiftUI
 @testable import OpenNotchKit
 
 // Test doubles — public API only, no host internals.
-@MainActor final class FakeNowPlaying: NowPlayingService {
+@Observable @MainActor final class FakeNowPlaying: NowPlayingService {
     var current: NowPlayingInfo?
-    var calls: [String] = []
+    @ObservationIgnored var calls: [String] = []
     func play() { calls.append("play") }
     func pause() { calls.append("pause") }
     func toggle() { calls.append("toggle") }

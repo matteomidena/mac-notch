@@ -1,18 +1,21 @@
 import Foundation
+import Observation
 import OpenNotchKit
 
-@MainActor public final class MediaRemoteBridge: NowPlayingService {
+@Observable @MainActor public final class MediaRemoteBridge: NowPlayingService {
+    // Only `current` is observed (drives the SwiftUI widget). Everything else is
+    // implementation detail and excluded from observation.
     public private(set) var current: NowPlayingInfo?
-    private let perl = "/usr/bin/perl"
-    private let script: String       // vendor/.../mediaremote-adapter.pl
-    private let framework: String    // vendor/.../MediaRemoteAdapter.framework
-    private var stream: Process?
+    @ObservationIgnored private let perl = "/usr/bin/perl"
+    @ObservationIgnored private let script: String       // vendor/.../mediaremote-adapter.pl
+    @ObservationIgnored private let framework: String    // vendor/.../MediaRemoteAdapter.framework
+    @ObservationIgnored private var stream: Process?
 
     // Accumulates stream bytes across reads. Only ever touched inside the
     // readabilityHandler, which Foundation invokes serially on one background
     // queue — hence nonisolated(unsafe) is safe here.
     // ponytail: single-queue invariant; revisit if the read source ever changes.
-    nonisolated(unsafe) private var lineBuffer = Data()
+    @ObservationIgnored nonisolated(unsafe) private var lineBuffer = Data()
 
     public init(script: String, framework: String) {
         // dyld's dl_load_file (used by the perl adapter) requires an ABSOLUTE
