@@ -18,4 +18,8 @@ import SwiftUI
             .sorted { (rank[$0.element.size]!, $0.offset) < (rank[$1.element.size]!, $1.offset) }
             .map(\.element)
     }
+
+    /// Compact views for the ambient bar, in plugin order (first non-nil wins per side).
+    public var compactLeading: [AnyView] { plugins.compactMap { $0.compactLeading() } }
+    public var compactTrailing: [AnyView] { plugins.compactMap { $0.compactTrailing() } }
 }

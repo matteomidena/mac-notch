@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let host = AppHost(bridge: bridge)
         let runtime = PluginRuntime(host: host, plugins: [MediaPlugin(host: host)])
-        let notch = NotchController(widgets: runtime.widgets)
+        let notch = NotchController(runtime: runtime, nowPlaying: host.nowPlaying)
         notch.show()
 
         self.host = host

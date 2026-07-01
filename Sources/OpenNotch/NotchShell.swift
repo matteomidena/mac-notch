@@ -36,6 +36,11 @@ struct NotchPanelShape: Shape {
     var phase: NotchPhase = .collapsed
     var widgets: [PluginWidget]
     var topInset: CGFloat = 32          // menubar/notch height reserved at the top
+    // Ambient bar (collapsed + has media): compact views flank the physical notch.
+    var showAmbient = false
+    var notchGap: CGFloat = 200         // physical notch width left transparent in the middle
+    @ObservationIgnored var compactLeading: AnyView?
+    @ObservationIgnored var compactTrailing: AnyView?
     init(widgets: [PluginWidget]) { self.widgets = widgets }
 }
 
@@ -90,6 +95,17 @@ struct NotchShell: View {
                 }
                 .background(.black, in: NotchPanelShape())         // hardware-notch silhouette
                 .transition(.scale(scale: 0.85, anchor: .top).combined(with: .opacity))
+            } else if model.showAmbient {
+                // Ambient bar: artwork left of the notch, visualizer right, with
+                // the physical notch showing through the transparent middle gap.
+                HStack(spacing: 0) {
+                    model.compactLeading
+                    Spacer(minLength: model.notchGap)
+                    model.compactTrailing
+                }
+                .padding(.horizontal, 15)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.black, in: NotchPanelShape(topRadius: 8, bottomRadius: 14))
             } else {
                 NotchPanelShape(topRadius: 6, bottomRadius: 12)
                     .fill(.black)
@@ -97,6 +113,7 @@ struct NotchShell: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .animation(.easeInOut(duration: 0.28), value: model.showAmbient)
         // Bouncy: noticeable overshoot as the panel drops from the notch.
         .animation(.bouncy(duration: 0.45, extraBounce: 0.3), value: model.phase)
     }

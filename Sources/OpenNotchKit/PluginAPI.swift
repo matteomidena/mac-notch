@@ -44,4 +44,13 @@ public struct PluginWidget: Identifiable {
     static var manifest: PluginManifest { get }
     init(host: PluginHost)
     func widgets() -> [PluginWidget]
+    // Optional compact views shown in the collapsed "ambient" bar, flanking the
+    // physical notch (leading = left of notch, trailing = right). Default nil.
+    func compactLeading() -> AnyView?
+    func compactTrailing() -> AnyView?
+}
+
+public extension NotchPlugin {
+    func compactLeading() -> AnyView? { nil }
+    func compactTrailing() -> AnyView? { nil }
 }

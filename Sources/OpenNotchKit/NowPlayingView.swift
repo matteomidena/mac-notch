@@ -33,17 +33,21 @@ public struct ArtworkView: View {
 /// (Not a real FFT — MediaRemote gives no level data; this is an ambient indicator.)
 public struct EqualizerBars: View {
     private let isPlaying: Bool
+    private let barHeight: CGFloat
     private let barCount = 4
-    public init(isPlaying: Bool) { self.isPlaying = isPlaying }
+    public init(isPlaying: Bool, barHeight: CGFloat = 18) {
+        self.isPlaying = isPlaying
+        self.barHeight = barHeight
+    }
     public var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isPlaying)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 2.5) {
+            HStack(alignment: .center, spacing: 2) {
                 ForEach(0..<barCount, id: \.self) { i in
-                    Capsule().frame(width: 3, height: 18 * height(i: i, t: t))
+                    Capsule().frame(width: 2.5, height: barHeight * height(i: i, t: t))
                 }
             }
-            .frame(height: 18)
+            .frame(height: barHeight)
         }
     }
     private func height(i: Int, t: Double) -> Double {

@@ -19,13 +19,21 @@ final class NotchController: NSObject {
     private let panel: NotchWindow
     private let hostingView: NSHostingView<NotchShell>
     private let model: NotchViewModel
+    // ponytail: the controller observes nowPlaying directly to size the ambient
+    // bar. Fine for the single media plugin; generalize when a real compact-widget
+    // API + multi-plugin composition lands.
+    private let nowPlaying: NowPlayingService
     private var stateMachine = NotchStateMachine()
     private var trackingArea: NSTrackingArea?
     private var pendingHoverOut: DispatchWorkItem?
     private var pendingShrink: DispatchWorkItem?
 
-    init(widgets: [PluginWidget] = []) {
-        model = NotchViewModel(widgets: widgets)
+    init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+        self.nowPlaying = nowPlaying
+        model = NotchViewModel(widgets: runtime.widgets)
+        model.compactLeading = runtime.compactLeading.first
+        model.compactTrailing = runtime.compactTrailing.first
+        model.notchGap = notchWidth
 
         let initialFrame = CGRect(origin: .zero, size: fallbackPillSize)
         hostingView = NSHostingView(rootView: NotchShell(model: model))
@@ -50,9 +58,18 @@ final class NotchController: NSObject {
         // the expanded content hangs below the notch, not over it.
         if let inset = NSScreen.main?.safeAreaInsets.top, inset > 0 { model.topInset = inset }
 
-        panel.setFrame(anchorRect(), display: false)
+        // Measure the ACTUAL notch width from the areas flanking it, so the
+        // ambient bar's transparent middle gap matches the hardware exactly.
+        if let screen = NSScreen.main,
+           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            model.notchGap = max(80, screen.frame.width - left.width - right.width) + 6
+        }
+
+        model.showAmbient = (nowPlaying.current != nil)
+        panel.setFrame(collapsedFrame(), display: false)
         installTrackingArea()
         observeFullscreenNotifications()
+        observePlayback()
     }
 
     func show() {
@@ -87,6 +104,38 @@ final class NotchController: NSObject {
         return CGRect(origin: origin, size: expandedSize)
     }
 
+    /// Collapsed footprint: a wide ambient bar wrapping the notch when there's
+    /// media to show, otherwise the bare notch shape.
+    private func collapsedFrame() -> CGRect {
+        let anchor = anchorRect()
+        guard model.showAmbient else { return anchor }
+        let height = model.topInset                 // stay within the notch/menubar strip
+        let width = model.notchGap + 84             // notch gap + flanking content + side padding
+        let origin = CGPoint(x: anchor.midX - width / 2, y: anchor.maxY - height)
+        return CGRect(origin: origin, size: CGSize(width: width, height: height))
+    }
+
+    // MARK: - Playback → ambient bar
+
+    private func observePlayback() {
+        withObservationTracking {
+            _ = nowPlaying.current            // track changes to now-playing state
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.playbackChanged()
+                self?.observePlayback()       // re-arm (withObservationTracking is one-shot)
+            }
+        }
+    }
+
+    private func playbackChanged() {
+        model.showAmbient = (nowPlaying.current != nil)
+        // Resize the collapsed footprint live if we're currently collapsed.
+        if stateMachine.phase == .collapsed {
+            panel.setFrame(collapsedFrame(), display: true, animate: true)
+        }
+    }
+
     private func applyFrame(for phase: NotchPhase, animated: Bool) {
         pendingShrink?.cancel(); pendingShrink = nil
         switch phase {
@@ -103,18 +152,18 @@ final class NotchController: NSObject {
             panel.orderFrontRegardless()
             model.phase = .collapsed
             // Keep the full canvas during the close animation, then shrink the
-            // window to the notch footprint so it doesn't block the menu bar.
-            let anchor = anchorRect()
+            // window to the collapsed footprint (ambient bar or bare notch).
+            let target = collapsedFrame()
             if animated {
                 let work = DispatchWorkItem { [weak self] in
                     guard let self, self.stateMachine.phase == .collapsed else { return }
-                    self.panel.setFrame(anchor, display: true)
+                    self.panel.setFrame(target, display: true)
                 }
                 pendingShrink = work
                 // Longer than the bouncy settle time so the close isn't clipped.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.65, execute: work)
             } else {
-                panel.setFrame(anchor, display: true)
+                panel.setFrame(target, display: true)
             }
         }
     }
