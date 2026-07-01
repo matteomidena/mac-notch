@@ -80,41 +80,47 @@ struct NotchShell: View {
     let model: NotchViewModel
     var body: some View {
         ZStack(alignment: .top) {
-            Color.clear                                  // fill the (fixed-size) window canvas
-            if model.phase == .expanded {
-                VStack(spacing: 0) {
-                    Color.clear.frame(height: model.topInset)     // reserve the notch/menubar strip
-                    HStack(alignment: .center, spacing: 14) {
-                        ForEach(model.widgets) { $0.content }      // player (left)
-                        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
-                        QuickActionsPlaceholder()                  // shortcuts (right)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 14)
-                    .padding(.top, 4)
-                }
-                .background(.black, in: NotchPanelShape())         // hardware-notch silhouette
-                .transition(.scale(scale: 0.85, anchor: .top).combined(with: .opacity))
-            } else if model.showAmbient {
-                // Ambient bar: artwork left of the notch, visualizer right, with
-                // the physical notch showing through the transparent middle gap.
-                HStack(spacing: 0) {
-                    model.compactLeading
-                    Spacer(minLength: model.notchGap)
-                    model.compactTrailing
-                }
-                .padding(.horizontal, 15)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.black, in: NotchPanelShape(topRadius: 8, bottomRadius: 14))
-            } else {
-                NotchPanelShape(topRadius: 6, bottomRadius: 12)
-                    .fill(.black)
-                    .frame(width: 180, height: 32)       // notch-sized collapsed shape
-            }
+            // One continuous black panel that fills the window and resizes with it
+            // (the window frame animation drives open/close). Kept OUT of the
+            // content animation so it stays pinned to the notch top edge — no
+            // bounce lag, no gap, no double-shape crossfade on close.
+            NotchPanelShape(topRadius: 10, bottomRadius: 20).fill(.black)
+
+            content
+                .animation(.easeInOut(duration: 0.18), value: model.phase)
+                .animation(.easeInOut(duration: 0.16), value: model.showAmbient)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(.easeInOut(duration: 0.28), value: model.showAmbient)
-        // Bouncy: noticeable overshoot as the panel drops from the notch.
-        .animation(.bouncy(duration: 0.45, extraBounce: 0.3), value: model.phase)
+    }
+
+    /// The inner content that crossfades inside the stable black panel.
+    @ViewBuilder private var content: some View {
+        if model.phase == .expanded {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: model.topInset)     // reserve the notch/menubar strip
+                HStack(alignment: .center, spacing: 12) {
+                    ForEach(model.widgets) { $0.content }      // player (left)
+                    Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
+                    QuickActionsPlaceholder()                  // shortcuts (right)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+                .padding(.top, 4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .transition(.opacity)
+        } else if model.showAmbient {
+            // Ambient bar: artwork left of the notch, visualizer right, with the
+            // physical notch showing through the transparent middle gap.
+            HStack(spacing: 0) {
+                model.compactLeading
+                Spacer(minLength: model.notchGap)
+                model.compactTrailing
+            }
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transition(.opacity)
+        }
+        // collapsed && !showAmbient → no content; the bare black notch shows.
     }
 }

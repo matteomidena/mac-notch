@@ -7,13 +7,33 @@ import OpenNotchKit
 final class NotchWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    /// When set, `animator().setFrame` uses this spring for the frame animation
+    /// (GPU-driven, real overshoot) instead of the context's timing function.
+    var frameSpring: CASpringAnimation?
+    override func animation(forKey key: NSAnimatablePropertyKey) -> Any? {
+        if key == "frame", let frameSpring { return frameSpring }
+        return super.animation(forKey: key)
+    }
+}
+
+/// Build a `CASpringAnimation` for the window frame from SwiftUI-style params.
+/// `response` = perceptual duration, `damping` = fraction (1 = no overshoot).
+private func frameSpring(response: Double, damping: Double) -> CASpringAnimation {
+    let s = CASpringAnimation(keyPath: "frame")
+    s.mass = 1
+    s.stiffness = pow(2 * .pi / response, 2) * s.mass
+    s.damping = 4 * .pi * damping * s.mass / response
+    s.initialVelocity = 0
+    s.duration = s.settlingDuration
+    return s
 }
 
 @MainActor
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 540, height: 168)
+    private let expandedSize = CGSize(width: 500, height: 124)
     private let hoverOutGrace: TimeInterval = 0.2
 
     private let panel: NotchWindow
@@ -26,7 +46,11 @@ final class NotchController: NSObject {
     private var stateMachine = NotchStateMachine()
     private var trackingArea: NSTrackingArea?
     private var pendingHoverOut: DispatchWorkItem?
-    private var pendingShrink: DispatchWorkItem?
+    private var hoverUnlock: DispatchWorkItem?
+    // While the open spring settles, its overshoot oscillation wobbles the window
+    // edges across a stationary cursor — which would fire enter/exit repeatedly
+    // and loop open/close. Ignore hover events until it settles, then re-check.
+    private var hoverLocked = false
     private var coveredByFullscreen = false
     private var fullscreenPoll: Timer?
 
@@ -110,7 +134,7 @@ final class NotchController: NSObject {
         let anchor = anchorRect()
         guard model.showAmbient else { return anchor }
         let height = model.topInset                 // stay within the notch/menubar strip
-        let width = model.notchGap + 84             // notch gap + flanking content + side padding
+        let width = model.notchGap + 94             // notch gap + flanking content + side padding
         let origin = CGPoint(x: anchor.midX - width / 2, y: anchor.maxY - height)
         return CGRect(origin: origin, size: CGSize(width: width, height: height))
     }
@@ -137,31 +161,45 @@ final class NotchController: NSObject {
     }
 
     private func applyFrame(for phase: NotchPhase, animated: Bool) {
-        pendingShrink?.cancel(); pendingShrink = nil
         switch phase {
         case .hidden:
             model.phase = .hidden
             panel.orderOut(nil)
         case .expanded:
-            // Grow the window to the full canvas BEFORE the spring so the
-            // expanding panel is never clipped, then animate it open.
-            panel.setFrame(expandedRect(), display: true)
             panel.orderFrontRegardless()
             model.phase = .expanded
+            // Animate the window growing downward from the notch (top edge stays
+            // anchored). The black panel fills the window, so the menubar strip is
+            // solid from the first frame — no transparent flash. Mirrors the close.
+            let target = expandedRect()
+            if animated {
+                // Dynamic-Island drop: a real spring with overshoot. The top edge
+                // stays pinned (origin.y and height move on one shared fraction).
+                let spring = frameSpring(response: 0.4, damping: 0.62)
+                panel.frameSpring = spring
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = spring.settlingDuration
+                    panel.animator().setFrame(target, display: true)
+                }
+                lockHover(for: min(spring.settlingDuration, 0.55))
+            } else {
+                panel.frameSpring = nil
+                panel.setFrame(target, display: true)
+            }
         case .collapsed:
             panel.orderFrontRegardless()
             model.phase = .collapsed
-            // Keep the full canvas during the close animation, then shrink the
-            // window to the collapsed footprint (ambient bar or bare notch).
+            // Retract the window to the collapsed footprint (ambient bar or bare
+            // notch). The panel fills the window, so animating the frame down IS
+            // the close animation — the black panel shrinks smoothly into the notch.
             let target = collapsedFrame()
+            panel.frameSpring = nil   // keep the smooth easeOut close
             if animated {
-                let work = DispatchWorkItem { [weak self] in
-                    guard let self, self.stateMachine.phase == .collapsed else { return }
-                    self.panel.setFrame(target, display: true)
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.26
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    panel.animator().setFrame(target, display: true)
                 }
-                pendingShrink = work
-                // Longer than the bouncy settle time so the close isn't clipped.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65, execute: work)
             } else {
                 panel.setFrame(target, display: true)
             }
@@ -186,18 +224,36 @@ final class NotchController: NSObject {
     // Explicit ObjC selectors: NSTrackingArea sends `mouseEntered:`/`mouseExited:`
     // to its owner. Swift would otherwise mangle these to `mouseEnteredWith:`.
     @objc(mouseEntered:) func mouseEntered(with event: NSEvent) {
+        guard !hoverLocked else { return }
         pendingHoverOut?.cancel()
         pendingHoverOut = nil
         transition(.hoverIn)
     }
 
     @objc(mouseExited:) func mouseExited(with event: NSEvent) {
+        guard !hoverLocked else { return }
         let workItem = DispatchWorkItem { [weak self] in
             self?.transition(.hoverOut)
         }
         pendingHoverOut?.cancel()
         pendingHoverOut = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + hoverOutGrace, execute: workItem)
+    }
+
+    /// Ignore hover events for `duration` (the open spring's settle), then collapse
+    /// if the cursor genuinely left during it — so the overshoot wobble can't loop.
+    private func lockHover(for duration: TimeInterval) {
+        hoverLocked = true
+        hoverUnlock?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.hoverLocked = false
+            if !NSMouseInRect(NSEvent.mouseLocation, self.panel.frame, false) {
+                self.transition(.hoverOut)
+            }
+        }
+        hoverUnlock = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 
     // MARK: - Fullscreen tracking
