@@ -257,12 +257,17 @@ git commit -m "feat: notch geometry with notch-less pill fallback"
       public var isPlaying: Bool
       public var elapsed: TimeInterval?
       public var duration: TimeInterval?
-      public var artworkPNG: Data?
+      public var artworkData: Data?        // raw bytes; NSImage(data:) handles JPEG or PNG
+      public var artworkMimeType: String?
       public init(title: String? = nil, artist: String? = nil, album: String? = nil,
                   isPlaying: Bool = false, elapsed: TimeInterval? = nil,
-                  duration: TimeInterval? = nil, artworkPNG: Data? = nil)
+                  duration: TimeInterval? = nil, artworkData: Data? = nil,
+                  artworkMimeType: String? = nil)
   }
   ```
+  > **Spike correction (Task 1):** artwork arrives as `artworkData` (base64) +
+  > `artworkMimeType` and was observed as JPEG, not PNG — hence `artworkData`
+  > (raw bytes), not `artworkPNG`.
 
 - [ ] **Step 1: Implement the model**
 
@@ -284,7 +289,7 @@ git commit -m "feat: NowPlayingInfo model"
 
 ### Task 5: NowPlayingParser (pure, TDD)
 
-Parses one line of adapter JSON into `NowPlayingInfo`. Field names below match the documented adapter output; **if the Task 1 spike observed different names, use the observed names and update these tests to match the real fixture.**
+Parses one line of adapter JSON into `NowPlayingInfo`. Field names below are the REAL names the Task 1 spike observed (see `spike/README.md` and the captured fixture). **`isPlaying` comes from the boolean `playing` key — NOT `playbackRate` (which is absent entirely when paused).**
 
 **Files:**
 - Create: `Sources/OpenNotchKit/NowPlayingParser.swift`
@@ -308,7 +313,7 @@ import Foundation
 @testable import OpenNotchKit
 
 @Test func parsesPlayingTrack() {
-    let line = #"{"title":"Song","artist":"Artist","album":"Album","elapsedTime":12.5,"duration":200,"playbackRate":1}"#
+    let line = #"{"title":"Song","artist":"Artist","album":"Album","elapsedTime":12.5,"duration":200,"playing":true}"#
     let info = NowPlayingParser.parse(line: line)
     #expect(info?.title == "Song")
     #expect(info?.artist == "Artist")
@@ -317,8 +322,9 @@ import Foundation
     #expect(info?.duration == 200)
 }
 
-@Test func playbackRateZeroMeansPaused() {
-    let line = #"{"title":"S","playbackRate":0}"#
+@Test func playingFalseMeansPaused() {
+    // Real adapter output: paused lines carry "playing":false and omit playbackRate entirely.
+    let line = #"{"title":"S","playing":false}"#
     #expect(NowPlayingParser.parse(line: line)?.isPlaying == false)
 }
 
@@ -351,8 +357,9 @@ public enum NowPlayingParser {
         info.album = obj["album"] as? String
         info.elapsed = (obj["elapsedTime"] as? NSNumber)?.doubleValue
         info.duration = (obj["duration"] as? NSNumber)?.doubleValue
-        info.isPlaying = ((obj["playbackRate"] as? NSNumber)?.doubleValue ?? 0) > 0
-        if let b64 = obj["artworkData"] as? String { info.artworkPNG = Data(base64Encoded: b64) }
+        info.isPlaying = (obj["playing"] as? NSNumber)?.boolValue ?? false
+        info.artworkMimeType = obj["artworkMimeType"] as? String
+        if let b64 = obj["artworkData"] as? String { info.artworkData = Data(base64Encoded: b64) }
         return info
     }
 }
@@ -697,7 +704,7 @@ public struct NowPlayingView: View {
     public init(service: NowPlayingService) { self.vm = NowPlayingViewModel(service: service) }
     public var body: some View {
         HStack(spacing: 12) {
-            if let png = vm.info?.artworkPNG, let img = NSImage(data: png) {
+            if let bytes = vm.info?.artworkData, let img = NSImage(data: bytes) {
                 Image(nsImage: img).resizable().frame(width: 44, height: 44).cornerRadius(6)
             } else {
                 RoundedRectangle(cornerRadius: 6).fill(.gray.opacity(0.3)).frame(width: 44, height: 44)
@@ -779,7 +786,9 @@ import OpenNotchKit
     public func start() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: perl)
-        p.arguments = [script, framework, "stream"]   // exact args per spike/README.md
+        // "--no-diff" so each streamed line is a complete snapshot (the adapter
+        // diffs by default, emitting only changed keys — see spike/README.md).
+        p.arguments = [script, framework, "stream", "--no-diff"]
         let pipe = Pipe(); p.standardOutput = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             guard let self, let s = String(data: h.availableData, encoding: .utf8) else { return }
@@ -792,19 +801,27 @@ import OpenNotchKit
         try? p.run(); stream = p
     }
 
-    private func send(_ command: String) {
+    // Adapter transport commands are NUMERIC IDs (spike/README.md):
+    // 0=play 1=pause 2=togglePlayPause 4=nextTrack 5=previousTrack.
+    private func send(_ id: Int) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: perl)
-        p.arguments = [script, framework, "send", command]  // exact per spike/README.md
+        p.arguments = [script, framework, "send", String(id)]
         try? p.run()
     }
 
-    public func play() { send("play") }
-    public func pause() { send("pause") }
-    public func toggle() { send("togglePlayPause") }
-    public func next() { send("nextTrack") }
-    public func previous() { send("previousTrack") }
-    public func seek(to time: TimeInterval) { send("setElapsedTime \(time)") }
+    public func play() { send(0) }
+    public func pause() { send(1) }
+    public func toggle() { send(2) }
+    public func next() { send(4) }
+    public func previous() { send(5) }
+    // "seek" is a separate top-level command taking MICROSECONDS, not "send".
+    public func seek(to time: TimeInterval) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: perl)
+        p.arguments = [script, framework, "seek", String(Int(time * 1_000_000))]
+        try? p.run()
+    }
 }
 ```
 
