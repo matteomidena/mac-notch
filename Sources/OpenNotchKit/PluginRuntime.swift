@@ -12,11 +12,18 @@ import SwiftUI
     }
 
     public func reload() {
-        let rank: [WidgetSize: Int] = [.wide: 0, .medium: 1, .small: 2]
         widgets = plugins.flatMap { $0.widgets() }
             .enumerated()
-            .sorted { (rank[$0.element.size]!, $0.offset) < (rank[$1.element.size]!, $1.offset) }
+            .sorted { (rank($0.element.size), $0.offset) < (rank($1.element.size), $1.offset) }
             .map(\.element)
+    }
+
+    private func rank(_ s: WidgetSize) -> Int {
+        switch s {
+        case .wide: 0
+        case .medium: 1
+        case .small: 2
+        }
     }
 
     /// Compact views for the ambient bar, in plugin order (first non-nil wins per side).

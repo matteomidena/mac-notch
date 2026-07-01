@@ -32,6 +32,7 @@ import OpenNotchKit
     }
 
     public func start() {
+        guard stream == nil else { return }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: perl)
         // "--no-diff" so each streamed payload is a complete snapshot (the adapter
@@ -57,6 +58,15 @@ import OpenNotchKit
         try? p.run(); stream = p
     }
 
+    public func stop() {
+        stream?.terminate()
+        stream = nil
+    }
+
+    deinit {
+        stream?.terminate()
+    }
+
     // `stream` wraps fields in an envelope {"type":"data","payload":{…}}, whereas
     // `get` (what NowPlayingParser + the fixture were built against) puts fields at
     // top level. Unwrap the payload and feed the parser get-style JSON.
@@ -69,14 +79,20 @@ import OpenNotchKit
         return NowPlayingParser.parse(line: payloadLine)
     }
 
-    // Adapter transport commands are NUMERIC IDs (spike/README.md):
-    // 0=play 1=pause 2=togglePlayPause 4=nextTrack 5=previousTrack.
-    private func send(_ id: Int) {
+    private func runAdapter(_ args: [String]) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: perl)
-        p.arguments = [script, framework, "send", String(id)]
-        try? p.run()
+        p.arguments = [script, framework] + args
+        do {
+            try p.run()
+        } catch {
+            NSLog("OpenNotch: adapter command failed: \(error)")
+        }
     }
+
+    // Adapter transport commands are NUMERIC IDs (spike/README.md):
+    // 0=play 1=pause 2=togglePlayPause 4=nextTrack 5=previousTrack.
+    private func send(_ id: Int) { runAdapter(["send", String(id)]) }
 
     public func play() { send(0) }
     public func pause() { send(1) }
@@ -85,9 +101,6 @@ import OpenNotchKit
     public func previous() { send(5) }
     // "seek" is a separate top-level command taking MICROSECONDS, not "send".
     public func seek(to time: TimeInterval) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: perl)
-        p.arguments = [script, framework, "seek", String(Int(time * 1_000_000))]
-        try? p.run()
+        runAdapter(["seek", String(Int(time * 1_000_000))])
     }
 }

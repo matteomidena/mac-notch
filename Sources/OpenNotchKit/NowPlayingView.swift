@@ -3,7 +3,6 @@ import SwiftUI
 @MainActor public final class NowPlayingViewModel {
     private let service: NowPlayingService
     public init(service: NowPlayingService) { self.service = service }
-    public var info: NowPlayingInfo? { service.current }
     public func toggle() { service.toggle() }
     public func next() { service.next() }
     public func previous() { service.previous() }

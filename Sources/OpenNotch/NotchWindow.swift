@@ -31,6 +31,8 @@ final class NotchController: NSObject {
     init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
         self.nowPlaying = nowPlaying
         model = NotchViewModel(widgets: runtime.widgets)
+        // NOTE: if a live plugin-reload path is added later, it must re-push
+        // compactLeading/compactTrailing (not just widgets) into the model.
         model.compactLeading = runtime.compactLeading.first
         model.compactTrailing = runtime.compactTrailing.first
         model.notchGap = notchWidth
@@ -78,10 +80,6 @@ final class NotchController: NSObject {
 
     func hide() {
         panel.orderOut(nil)
-    }
-
-    func updateWidgets(_ widgets: [PluginWidget]) {
-        model.widgets = widgets
     }
 
     // MARK: - Geometry
