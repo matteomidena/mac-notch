@@ -43,7 +43,11 @@ private struct ShortcutsTab: View {
     }
     var body: some View {
         VStack(spacing: 8) {
-            TextField("Search apps", text: $query).textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Search apps", text: $query).textFieldStyle(.roundedBorder)
+                Text("\(store.bundleIds.count)/\(store.maxCount)")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
             List(filtered) { app in
                 Toggle(isOn: Binding(
                     get: { store.contains(app.bundleId) },
@@ -56,6 +60,8 @@ private struct ShortcutsTab: View {
                         Text(app.name)
                     }
                 }
+                // At the cap, only let the user turn things off.
+                .disabled(!store.contains(app.bundleId) && store.isFull)
             }
         }
         .padding(20)

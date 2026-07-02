@@ -33,7 +33,15 @@ final class AppHost: PluginHost {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
+    // Scanning + icon-encoding every installed app is expensive; the set rarely
+    // changes within a session, so cache it. quickActions() pulls (fired on every
+    // settings toggle via observation) hit the cache instead of re-scanning on the
+    // main thread. ponytail: lifetime cache — a newly-installed app needs an app
+    // restart to appear; add invalidation if that becomes a real need.
+    private var cachedApps: [InstalledApp]?
+
     func installedApps() -> [InstalledApp] {
+        if let cachedApps { return cachedApps }
         let fm = FileManager.default
         let dirs = ["/Applications", "/System/Applications",
                     (NSString(string: "~/Applications").expandingTildeInPath)]
@@ -51,7 +59,9 @@ final class AppHost: PluginHost {
                 apps.append(InstalledApp(bundleId: id, name: name, iconData: data))
             }
         }
-        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let sorted = apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        cachedApps = sorted
+        return sorted
     }
 }
 
