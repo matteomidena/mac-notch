@@ -16,6 +16,10 @@ import SwiftUI
 @MainActor final class FakeHost: PluginHost {
     let np = FakeNowPlaying()
     var nowPlaying: NowPlayingService { np }
+    var launched: [String] = []
+    var apps: [InstalledApp] = []
+    func launchApp(bundleIdentifier: String) { launched.append(bundleIdentifier) }
+    func installedApps() -> [InstalledApp] { apps }
 }
 @MainActor struct StubPlugin: NotchPlugin {
     static let manifest = PluginManifest(id: "test.stub", name: "Stub", version: "1", author: "t")
@@ -33,4 +37,17 @@ import SwiftUI
     let p = StubPlugin(host: host, sizes: [.small, .wide, .medium])
     let rt = PluginRuntime(host: host, plugins: [p])
     #expect(rt.widgets.map(\.size) == [.wide, .medium, .small])
+}
+
+@MainActor @Test func runtimeCollectsQuickActionsInPluginOrder() {
+    let host = FakeHost()
+    host.apps = [InstalledApp(bundleId: "com.a", name: "A", iconData: nil),
+                 InstalledApp(bundleId: "com.b", name: "B", iconData: nil)]
+    let suite = "opennotch.tests.rt.qa"
+    let d = UserDefaults(suiteName: suite)!
+    d.removePersistentDomain(forName: suite)
+    let store = LauncherStore(defaults: d, key: "k")
+    store.add("com.a"); store.add("com.b")
+    let rt = PluginRuntime(host: host, plugins: [AppLauncherPlugin(host: host, store: store)])
+    #expect(rt.quickActions.map(\.id) == ["com.a", "com.b"])
 }

@@ -29,4 +29,7 @@ import SwiftUI
     /// Compact views for the ambient bar, in plugin order (first non-nil wins per side).
     public var compactLeading: [AnyView] { plugins.compactMap { $0.compactLeading() } }
     public var compactTrailing: [AnyView] { plugins.compactMap { $0.compactTrailing() } }
+
+    /// Quick actions for the expanded panel's right column, in plugin order.
+    public var quickActions: [QuickAction] { plugins.flatMap { $0.quickActions() } }
 }

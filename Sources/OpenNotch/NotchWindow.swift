@@ -7,18 +7,39 @@ import OpenNotchKit
 final class NotchWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    /// When set, `animator().setFrame` uses this spring for the frame animation
+    /// (GPU-driven, real overshoot) instead of the context's timing function.
+    var frameSpring: CASpringAnimation?
+    override func animation(forKey key: NSAnimatablePropertyKey) -> Any? {
+        if key == "frame", let frameSpring { return frameSpring }
+        return super.animation(forKey: key)
+    }
+}
+
+/// Build a `CASpringAnimation` for the window frame from SwiftUI-style params.
+/// `response` = perceptual duration, `damping` = fraction (1 = no overshoot).
+private func frameSpring(response: Double, damping: Double) -> CASpringAnimation {
+    let s = CASpringAnimation(keyPath: "frame")
+    s.mass = 1
+    s.stiffness = pow(2 * .pi / response, 2) * s.mass
+    s.damping = 4 * .pi * damping * s.mass / response
+    s.initialVelocity = 0
+    s.duration = s.settlingDuration
+    return s
 }
 
 @MainActor
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 540, height: 168)
+    private let expandedSize = CGSize(width: 500, height: 124)
     private let hoverOutGrace: TimeInterval = 0.2
 
     private let panel: NotchWindow
     private let hostingView: NSHostingView<NotchShell>
     private let model: NotchViewModel
+    private let runtime: PluginRuntime
     // ponytail: the controller observes nowPlaying directly to size the ambient
     // bar. Fine for the single media plugin; generalize when a real compact-widget
     // API + multi-plugin composition lands.
@@ -26,15 +47,23 @@ final class NotchController: NSObject {
     private var stateMachine = NotchStateMachine()
     private var trackingArea: NSTrackingArea?
     private var pendingHoverOut: DispatchWorkItem?
-    private var pendingShrink: DispatchWorkItem?
+    private var hoverUnlock: DispatchWorkItem?
+    // While the open spring settles, its overshoot oscillation wobbles the window
+    // edges across a stationary cursor — which would fire enter/exit repeatedly
+    // and loop open/close. Ignore hover events until it settles, then re-check.
+    private var hoverLocked = false
+    private var coveredByFullscreen = false
+    private var fullscreenPoll: Timer?
 
     init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+        self.runtime = runtime
         self.nowPlaying = nowPlaying
         model = NotchViewModel(widgets: runtime.widgets)
         // NOTE: if a live plugin-reload path is added later, it must re-push
         // compactLeading/compactTrailing (not just widgets) into the model.
         model.compactLeading = runtime.compactLeading.first
         model.compactTrailing = runtime.compactTrailing.first
+        model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
 
         let initialFrame = CGRect(origin: .zero, size: fallbackPillSize)
@@ -70,8 +99,9 @@ final class NotchController: NSObject {
         model.showAmbient = (nowPlaying.current != nil)
         panel.setFrame(collapsedFrame(), display: false)
         installTrackingArea()
-        observeFullscreenNotifications()
         observePlayback()
+        observeFullscreen()
+        observeQuickActions()
     }
 
     func show() {
@@ -108,7 +138,7 @@ final class NotchController: NSObject {
         let anchor = anchorRect()
         guard model.showAmbient else { return anchor }
         let height = model.topInset                 // stay within the notch/menubar strip
-        let width = model.notchGap + 84             // notch gap + flanking content + side padding
+        let width = model.notchGap + 94             // notch gap + flanking content + side padding
         let origin = CGPoint(x: anchor.midX - width / 2, y: anchor.maxY - height)
         return CGRect(origin: origin, size: CGSize(width: width, height: height))
     }
@@ -126,6 +156,17 @@ final class NotchController: NSObject {
         }
     }
 
+    private func observeQuickActions() {
+        withObservationTracking {
+            _ = runtime.quickActions            // establishes dependency on store.bundleIds
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.model.quickActions = self?.runtime.quickActions ?? []
+                self?.observeQuickActions()     // re-arm (one-shot)
+            }
+        }
+    }
+
     private func playbackChanged() {
         model.showAmbient = (nowPlaying.current != nil)
         // Resize the collapsed footprint live if we're currently collapsed.
@@ -135,31 +176,45 @@ final class NotchController: NSObject {
     }
 
     private func applyFrame(for phase: NotchPhase, animated: Bool) {
-        pendingShrink?.cancel(); pendingShrink = nil
         switch phase {
         case .hidden:
             model.phase = .hidden
             panel.orderOut(nil)
         case .expanded:
-            // Grow the window to the full canvas BEFORE the spring so the
-            // expanding panel is never clipped, then animate it open.
-            panel.setFrame(expandedRect(), display: true)
             panel.orderFrontRegardless()
             model.phase = .expanded
+            // Animate the window growing downward from the notch (top edge stays
+            // anchored). The black panel fills the window, so the menubar strip is
+            // solid from the first frame — no transparent flash. Mirrors the close.
+            let target = expandedRect()
+            if animated {
+                // Dynamic-Island drop: a real spring with overshoot. The top edge
+                // stays pinned (origin.y and height move on one shared fraction).
+                let spring = frameSpring(response: 0.4, damping: 0.62)
+                panel.frameSpring = spring
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = spring.settlingDuration
+                    panel.animator().setFrame(target, display: true)
+                }
+                lockHover(for: min(spring.settlingDuration, 0.55))
+            } else {
+                panel.frameSpring = nil
+                panel.setFrame(target, display: true)
+            }
         case .collapsed:
             panel.orderFrontRegardless()
             model.phase = .collapsed
-            // Keep the full canvas during the close animation, then shrink the
-            // window to the collapsed footprint (ambient bar or bare notch).
+            // Retract the window to the collapsed footprint (ambient bar or bare
+            // notch). The panel fills the window, so animating the frame down IS
+            // the close animation — the black panel shrinks smoothly into the notch.
             let target = collapsedFrame()
+            panel.frameSpring = nil   // keep the smooth easeOut close
             if animated {
-                let work = DispatchWorkItem { [weak self] in
-                    guard let self, self.stateMachine.phase == .collapsed else { return }
-                    self.panel.setFrame(target, display: true)
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.26
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    panel.animator().setFrame(target, display: true)
                 }
-                pendingShrink = work
-                // Longer than the bouncy settle time so the close isn't clipped.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65, execute: work)
             } else {
                 panel.setFrame(target, display: true)
             }
@@ -184,12 +239,14 @@ final class NotchController: NSObject {
     // Explicit ObjC selectors: NSTrackingArea sends `mouseEntered:`/`mouseExited:`
     // to its owner. Swift would otherwise mangle these to `mouseEnteredWith:`.
     @objc(mouseEntered:) func mouseEntered(with event: NSEvent) {
+        guard !hoverLocked else { return }
         pendingHoverOut?.cancel()
         pendingHoverOut = nil
         transition(.hoverIn)
     }
 
     @objc(mouseExited:) func mouseExited(with event: NSEvent) {
+        guard !hoverLocked else { return }
         let workItem = DispatchWorkItem { [weak self] in
             self?.transition(.hoverOut)
         }
@@ -198,28 +255,77 @@ final class NotchController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + hoverOutGrace, execute: workItem)
     }
 
+    /// Ignore hover events for `duration` (the open spring's settle), then collapse
+    /// if the cursor genuinely left during it — so the overshoot wobble can't loop.
+    private func lockHover(for duration: TimeInterval) {
+        hoverLocked = true
+        hoverUnlock?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.hoverLocked = false
+            if !NSMouseInRect(NSEvent.mouseLocation, self.panel.frame, false) {
+                self.transition(.hoverOut)
+            }
+        }
+        hoverUnlock = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+    }
+
     // MARK: - Fullscreen tracking
 
-    private func observeFullscreenNotifications() {
-        // ponytail: NSWorkspace.activeSpaceDidChangeNotification fires on any Space
-        // switch, not just fullscreen apps. NSWindow.didEnter/ExitFullScreen are the
-        // precise per-app signals; that's what we key phase transitions off of.
-        NotificationCenter.default.addObserver(self,
-                                                selector: #selector(handleEnterFullscreen),
-                                                name: NSWindow.didEnterFullScreenNotification,
-                                                object: nil)
-        NotificationCenter.default.addObserver(self,
-                                                selector: #selector(handleExitFullscreen),
-                                                name: NSWindow.didExitFullScreenNotification,
-                                                object: nil)
+    private func observeFullscreen() {
+        // NSWindow.didEnter/ExitFullScreenNotification only fire for our OWN
+        // windows, which never go fullscreen — useless here. Native fullscreen
+        // fires activeSpaceDidChange, but Chromium in-window video fullscreen
+        // (a YouTube video) changes nothing observable — so poll the window list.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(evaluateFullscreen),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil)
+        // ponytail: 1s poll of the window list — the only mechanism that catches
+        // in-window video fullscreen (no notification fires). Cheap; raise the
+        // cadence if hide-on-fullscreen feels laggy.
+        let poll = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.evaluateFullscreen() }
+        }
+        RunLoop.main.add(poll, forMode: .common)
+        fullscreenPoll = poll
+        evaluateFullscreen()   // initial state (e.g. launched into a fullscreen space)
     }
 
-    @objc private func handleEnterFullscreen() {
-        transition(.enterFullscreen)
+    /// Snapshot the on-screen windows and edge-trigger hide/show.
+    @objc private func evaluateFullscreen() {
+        let covered = FullscreenDetector.coversNotch(currentWindows(),
+                                                     mainDisplayFrame: mainDisplayFrameCG())
+        guard covered != coveredByFullscreen else { return }
+        coveredByFullscreen = covered
+        transition(covered ? .enterFullscreen : .exitFullscreen)
     }
 
-    @objc private func handleExitFullscreen() {
-        transition(.exitFullscreen)
+    /// Main display frame in CoreGraphics (top-left origin) coordinates, matching
+    /// the window bounds returned by CGWindowListCopyWindowInfo.
+    private func mainDisplayFrameCG() -> CGRect {
+        guard let size = NSScreen.main?.frame.size else { return .zero }
+        return CGRect(origin: .zero, size: size)
+    }
+
+    private func currentWindows() -> [WindowSnapshot] {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return infos.compactMap { info in
+            // Only normal-layer windows (layer 0); skip menubar/dock/status items.
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
+                return nil
+            }
+            let pid = info[kCGWindowOwnerPID as String] as? pid_t
+            return WindowSnapshot(frame: bounds, isOwnApp: pid == ownPID)
+        }
     }
 
     // MARK: - State machine
