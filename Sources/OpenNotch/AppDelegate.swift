@@ -12,6 +12,15 @@ final class AppHost: PluginHost {
     init(bridge: MediaRemoteBridge) {
         self.bridge = bridge
     }
+
+    func launchApp(bundleIdentifier: String) {
+        // ponytail: stub for now; will be wired to NSWorkspace.shared.open when needed
+    }
+
+    func installedApps() -> [InstalledApp] {
+        // ponytail: stub for now; will be wired to AppKit enumeration when needed
+        []
+    }
 }
 
 @MainActor

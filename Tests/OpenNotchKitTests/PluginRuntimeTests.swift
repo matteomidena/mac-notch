@@ -16,6 +16,10 @@ import SwiftUI
 @MainActor final class FakeHost: PluginHost {
     let np = FakeNowPlaying()
     var nowPlaying: NowPlayingService { np }
+    var launched: [String] = []
+    var apps: [InstalledApp] = []
+    func launchApp(bundleIdentifier: String) { launched.append(bundleIdentifier) }
+    func installedApps() -> [InstalledApp] { apps }
 }
 @MainActor struct StubPlugin: NotchPlugin {
     static let manifest = PluginManifest(id: "test.stub", name: "Stub", version: "1", author: "t")

@@ -27,6 +27,39 @@ public struct PluginWidget: Identifiable {
     }
 }
 
+/// A tappable quick action contributed to the expanded panel's right column.
+/// `iconData` (a real app icon, PNG) is rendered like artwork; when nil the
+/// `systemImage` SF Symbol is used instead.
+public struct QuickAction: Identifiable {
+    public let id: String
+    public let title: String
+    public let systemImage: String
+    public let iconData: Data?
+    public let action: @MainActor () -> Void
+    public init(id: String, title: String, systemImage: String,
+                iconData: Data? = nil, action: @escaping @MainActor () -> Void) {
+        self.id = id
+        self.title = title
+        self.systemImage = systemImage
+        self.iconData = iconData
+        self.action = action
+    }
+}
+
+/// An installed application the host discovered, exposed to plugins so they can
+/// resolve a bundle id to a display name + icon without touching AppKit.
+public struct InstalledApp: Identifiable, Equatable, Sendable {
+    public let bundleId: String
+    public let name: String
+    public let iconData: Data?
+    public var id: String { bundleId }
+    public init(bundleId: String, name: String, iconData: Data?) {
+        self.bundleId = bundleId
+        self.name = name
+        self.iconData = iconData
+    }
+}
+
 // `Observable` conformance is required so SwiftUI re-renders widgets when
 // now-playing state changes. Conformers must be `@Observable`.
 @MainActor public protocol NowPlayingService: AnyObject, Observable {
@@ -38,6 +71,8 @@ public struct PluginWidget: Identifiable {
 
 @MainActor public protocol PluginHost: AnyObject {
     var nowPlaying: NowPlayingService { get }
+    func launchApp(bundleIdentifier: String)
+    func installedApps() -> [InstalledApp]
 }
 
 @MainActor public protocol NotchPlugin {
@@ -48,9 +83,11 @@ public struct PluginWidget: Identifiable {
     // physical notch (leading = left of notch, trailing = right). Default nil.
     func compactLeading() -> AnyView?
     func compactTrailing() -> AnyView?
+    func quickActions() -> [QuickAction]
 }
 
 public extension NotchPlugin {
     func compactLeading() -> AnyView? { nil }
     func compactTrailing() -> AnyView? { nil }
+    func quickActions() -> [QuickAction] { [] }
 }
