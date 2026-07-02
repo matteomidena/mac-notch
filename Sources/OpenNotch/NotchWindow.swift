@@ -39,6 +39,7 @@ final class NotchController: NSObject {
     private let panel: NotchWindow
     private let hostingView: NSHostingView<NotchShell>
     private let model: NotchViewModel
+    private let runtime: PluginRuntime
     // ponytail: the controller observes nowPlaying directly to size the ambient
     // bar. Fine for the single media plugin; generalize when a real compact-widget
     // API + multi-plugin composition lands.
@@ -55,12 +56,14 @@ final class NotchController: NSObject {
     private var fullscreenPoll: Timer?
 
     init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+        self.runtime = runtime
         self.nowPlaying = nowPlaying
         model = NotchViewModel(widgets: runtime.widgets)
         // NOTE: if a live plugin-reload path is added later, it must re-push
         // compactLeading/compactTrailing (not just widgets) into the model.
         model.compactLeading = runtime.compactLeading.first
         model.compactTrailing = runtime.compactTrailing.first
+        model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
 
         let initialFrame = CGRect(origin: .zero, size: fallbackPillSize)
@@ -98,6 +101,7 @@ final class NotchController: NSObject {
         installTrackingArea()
         observePlayback()
         observeFullscreen()
+        observeQuickActions()
     }
 
     func show() {
@@ -148,6 +152,17 @@ final class NotchController: NSObject {
             Task { @MainActor in
                 self?.playbackChanged()
                 self?.observePlayback()       // re-arm (withObservationTracking is one-shot)
+            }
+        }
+    }
+
+    private func observeQuickActions() {
+        withObservationTracking {
+            _ = runtime.quickActions            // establishes dependency on store.bundleIds
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.model.quickActions = self?.runtime.quickActions ?? []
+                self?.observeQuickActions()     // re-arm (one-shot)
             }
         }
     }

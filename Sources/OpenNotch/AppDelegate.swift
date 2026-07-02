@@ -1,6 +1,19 @@
 import AppKit
 import ServiceManagement
+import SwiftUI
 import OpenNotchKit
+
+private extension NSImage {
+    func pngData(maxPixel: CGFloat = 32) -> Data? {
+        let target = NSImage(size: NSSize(width: maxPixel, height: maxPixel))
+        target.lockFocus()
+        draw(in: NSRect(x: 0, y: 0, width: maxPixel, height: maxPixel))
+        target.unlockFocus()
+        guard let tiff = target.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+}
 
 /// Wires the real host (MediaRemote bridge) to the plugin runtime the
 /// notch panel renders.
@@ -14,12 +27,32 @@ final class AppHost: PluginHost {
     }
 
     func launchApp(bundleIdentifier: String) {
-        // ponytail: stub for now; will be wired to NSWorkspace.shared.open when needed
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            NSLog("OpenNotch: no app for bundle id \(bundleIdentifier)")
+            return
+        }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     func installedApps() -> [InstalledApp] {
-        // ponytail: stub for now; will be wired to AppKit enumeration when needed
-        []
+        let fm = FileManager.default
+        let dirs = ["/Applications", "/System/Applications",
+                    (NSString(string: "~/Applications").expandingTildeInPath)]
+        var seen = Set<String>()
+        var apps: [InstalledApp] = []
+        for dir in dirs {
+            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for entry in entries where entry.hasSuffix(".app") {
+                let path = "\(dir)/\(entry)"
+                guard let bundle = Bundle(path: path),
+                      let id = bundle.bundleIdentifier, !seen.contains(id) else { continue }
+                seen.insert(id)
+                let name = fm.displayName(atPath: path).replacingOccurrences(of: ".app", with: "")
+                let data = NSWorkspace.shared.icon(forFile: path).pngData()
+                apps.append(InstalledApp(bundleId: id, name: name, iconData: data))
+            }
+        }
+        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
 
@@ -29,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var runtime: PluginRuntime?
     private var notch: NotchController?
     private var statusItem: NSStatusItem?
+    private let launcherStore = LauncherStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bridge = MediaRemoteBridge(
@@ -37,7 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridge.start()
 
         let host = AppHost(bridge: bridge)
-        let runtime = PluginRuntime(host: host, plugins: [MediaPlugin(host: host)])
+        if launcherStore.bundleIds.isEmpty {
+            launcherStore.add("com.apple.Safari")
+            launcherStore.add("com.apple.iCal")     // Calendar
+        }
+        let runtime = PluginRuntime(host: host, plugins: [
+            MediaPlugin(host: host),
+            AppLauncherPlugin(host: host, store: launcherStore),
+        ])
         let notch = NotchController(runtime: runtime, nowPlaying: host.nowPlaying)
         notch.show()
 
