@@ -35,6 +35,7 @@ struct NotchPanelShape: Shape {
 @Observable @MainActor final class NotchViewModel {
     var phase: NotchPhase = .collapsed
     var widgets: [PluginWidget]
+    var quickActions: [QuickAction] = []
     var topInset: CGFloat = 32          // menubar/notch height reserved at the top
     // Ambient bar (collapsed + has media): compact views flank the physical notch.
     var showAmbient = false
@@ -44,35 +45,34 @@ struct NotchPanelShape: Shape {
     init(widgets: [PluginWidget]) { self.widgets = widgets }
 }
 
-/// Placeholder shortcuts column (right side of the expanded panel). These are
-/// visual stand-ins for future plugin-contributed quick actions, not working
-/// features. ponytail: replace with real plugin widgets when the compact/quick-
-/// action API lands.
-private struct QuickActionsPlaceholder: View {
+/// The expanded panel's right column: one pill per plugin-contributed QuickAction.
+private struct QuickActionsColumn: View {
+    let actions: [QuickAction]
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(spacing: 8) {
-                pill("Spotify")
-                pill("Shortcut")
+        VStack(spacing: 8) {
+            ForEach(actions) { action in
+                Button(action: action.action) {
+                    HStack(spacing: 8) {
+                        icon(for: action)
+                        Text(action.title)
+                            .foregroundStyle(.white).font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .frame(width: 132)
+                    .background(.white.opacity(0.08), in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
-            VStack(spacing: 4) {
-                Image(systemName: "video.fill").font(.system(size: 16))
-                Text("Mirror").font(.system(size: 10))
-            }
-            .foregroundStyle(.white.opacity(0.85))
-            .frame(width: 66, height: 66)
-            .background(.white.opacity(0.08), in: Circle())
         }
     }
-    private func pill(_ title: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "sparkles").foregroundStyle(.yellow).font(.system(size: 11))
-            Text(title).foregroundStyle(.white).font(.system(size: 12, weight: .medium))
-            Spacer(minLength: 0)
+    @ViewBuilder private func icon(for action: QuickAction) -> some View {
+        if let data = action.iconData, let img = NSImage(data: data) {
+            Image(nsImage: img).resizable().frame(width: 18, height: 18)
+        } else {
+            Image(systemName: action.systemImage).foregroundStyle(.white).font(.system(size: 13))
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .frame(width: 116)
-        .background(.white.opacity(0.08), in: Capsule())
     }
 }
 
@@ -100,8 +100,10 @@ struct NotchShell: View {
                 Color.clear.frame(height: model.topInset)     // reserve the notch/menubar strip
                 HStack(alignment: .center, spacing: 12) {
                     ForEach(model.widgets) { $0.content }      // player (left)
-                    Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
-                    QuickActionsPlaceholder()                  // shortcuts (right)
+                    if !model.quickActions.isEmpty {
+                        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
+                        QuickActionsColumn(actions: model.quickActions)   // shortcuts (right)
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
