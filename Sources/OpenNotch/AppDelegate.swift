@@ -1,5 +1,4 @@
 import AppKit
-import ServiceManagement
 import SwiftUI
 import OpenNotchKit
 
@@ -63,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notch: NotchController?
     private var statusItem: NSStatusItem?
     private let launcherStore = LauncherStore()
+    private let settings = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bridge = MediaRemoteBridge(
@@ -95,10 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        loginItem.target = self
-        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(loginItem)
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate), keyEquivalent: "q"))
@@ -107,16 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
-    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            NSLog("OpenNotch: failed to toggle launch at login: \(error)")
-        }
-        sender.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    @objc private func openSettings() {
+        settings.show(store: launcherStore, installedApps: host?.installedApps() ?? [])
     }
 }
