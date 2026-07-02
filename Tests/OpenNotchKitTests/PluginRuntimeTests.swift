@@ -38,3 +38,16 @@ import SwiftUI
     let rt = PluginRuntime(host: host, plugins: [p])
     #expect(rt.widgets.map(\.size) == [.wide, .medium, .small])
 }
+
+@MainActor @Test func runtimeCollectsQuickActionsInPluginOrder() {
+    let host = FakeHost()
+    host.apps = [InstalledApp(bundleId: "com.a", name: "A", iconData: nil),
+                 InstalledApp(bundleId: "com.b", name: "B", iconData: nil)]
+    let suite = "opennotch.tests.rt.qa"
+    let d = UserDefaults(suiteName: suite)!
+    d.removePersistentDomain(forName: suite)
+    let store = LauncherStore(defaults: d, key: "k")
+    store.add("com.a"); store.add("com.b")
+    let rt = PluginRuntime(host: host, plugins: [AppLauncherPlugin(host: host, store: store)])
+    #expect(rt.quickActions.map(\.id) == ["com.a", "com.b"])
+}
