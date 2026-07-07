@@ -80,6 +80,13 @@ public struct InstalledApp: Identifiable, Equatable, Sendable {
     var nowPlaying: NowPlayingService { get }
     func launchApp(bundleIdentifier: String)
     func installedApps() -> [InstalledApp]
+    func storage(for pluginId: String) -> PluginStorage
+}
+
+public extension PluginHost {
+    func storage(for pluginId: String) -> PluginStorage {
+        UserDefaultsPluginStorage(pluginId: pluginId)
+    }
 }
 
 @MainActor public protocol NotchPlugin {

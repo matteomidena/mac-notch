@@ -76,7 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var runtime: PluginRuntime?
     private var displays: DisplayCoordinator?
     private var statusItem: NSStatusItem?
-    private let launcherStore = LauncherStore()
+    private let launcherStore = LauncherStore(
+        storage: UserDefaultsPluginStorage(pluginId: "cafe.notch.launcher"))
     private let settings = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
