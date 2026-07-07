@@ -75,9 +75,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let bridge = MediaRemoteBridge(
-            script: "vendor/mediaremote-adapter/bin/mediaremote-adapter.pl",
-            framework: "vendor/mediaremote-adapter/build/MediaRemoteAdapter.framework")
+        let paths = AdapterPaths.resolve(
+            bundleResourceURL: Bundle.main.resourceURL,
+            cwd: FileManager.default.currentDirectoryPath,
+            fileExists: { FileManager.default.fileExists(atPath: $0) })
+        let bridge = MediaRemoteBridge(script: paths.script, framework: paths.framework)
         bridge.start()
 
         let host = AppHost(bridge: bridge)
