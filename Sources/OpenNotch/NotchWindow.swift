@@ -13,10 +13,13 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 500, height: 124)
+    private let expandedSize = CGSize(width: 430, height: 124)
     /// Fixed panel: expanded size + headroom for spring overshoot.
     private let panelSize = CGSize(width: 600, height: 184)
     private let hoverOutGrace: TimeInterval = 0.2
+    /// Dwell before opening on hover, so a cursor merely passing over the notch
+    /// (e.g. on its way to a menubar item) doesn't fling the panel open.
+    private let hoverInDwell: TimeInterval = 0.14
 
     private let screen: NSScreen
     private let panel: NotchWindow
@@ -30,6 +33,7 @@ final class NotchController: NSObject {
     private var stateMachine = NotchStateMachine()
     private var trackingArea: NSTrackingArea?
     private var pendingHoverOut: DispatchWorkItem?
+    private var pendingHoverIn: DispatchWorkItem?
     private var coveredByFullscreen = false
     private var fullscreenPoll: Timer?
     private var localMonitor: Any?
@@ -72,12 +76,15 @@ final class NotchController: NSObject {
         panel.setFrame(panelFrame(), display: false)
         hostingView.interactiveContains = { [weak self] point in
             guard let self else { return false }
+            // Always keep the menubar strip click-through outside the notch neck,
+            // so menubar items beside the notch (incl. our own status icon) stay
+            // clickable whether the panel is collapsed, ambient, or open.
             return NotchFootprint.interactiveContains(point, footprint: self.model.footprint,
                                                       bounds: self.hostingView.bounds,
                                                       flipped: self.hostingView.isFlipped,
                                                       neckWidth: self.notchWidth,
                                                       menuBarHeight: self.model.topInset,
-                                                      clearMenuBar: self.model.isOpen)
+                                                      clearMenuBar: true)
         }
         hostingView.onDragChange = { [weak self] inside in
             self?.transition(inside ? .dragIn : .dragOut)
@@ -189,10 +196,17 @@ final class NotchController: NSObject {
     @objc(mouseEntered:) func mouseEntered(with event: NSEvent) {
         pendingHoverOut?.cancel()
         pendingHoverOut = nil
-        transition(.hoverIn)
+        // Open only if the cursor lingers over the notch — a quick pass-through
+        // toward the menubar shouldn't trigger it.
+        let workItem = DispatchWorkItem { [weak self] in self?.transition(.hoverIn) }
+        pendingHoverIn?.cancel()
+        pendingHoverIn = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + hoverInDwell, execute: workItem)
     }
 
     @objc(mouseExited:) func mouseExited(with event: NSEvent) {
+        pendingHoverIn?.cancel()
+        pendingHoverIn = nil
         let workItem = DispatchWorkItem { [weak self] in
             self?.transition(.hoverOut)
         }
@@ -292,6 +306,7 @@ final class NotchController: NSObject {
         localMonitor = nil
         globalMonitor = nil
         pendingHoverOut?.cancel()
+        pendingHoverIn?.cancel()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
         panel.orderOut(nil)
