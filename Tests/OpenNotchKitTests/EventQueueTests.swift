@@ -3,8 +3,8 @@ import Foundation
 import SwiftUI
 @testable import OpenNotchKit
 
-private func ev(_ id: String, priority: Int, duration: TimeInterval) -> NotchEvent {
-    NotchEvent(id: id, priority: priority, duration: duration, view: AnyView(EmptyView()))
+private func ev(_ id: String, priority: Int, duration: TimeInterval) -> TransientEvent {
+    TransientEvent(id: id, priority: priority, duration: duration, view: AnyView(EmptyView()))
 }
 
 @MainActor @Test func currentReturnsPostedEventWithinWindow() {

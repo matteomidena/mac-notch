@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A transient island-style alert a plugin asks the host to show (charge started,
 /// meeting in 5 min). Priority breaks contention; duration bounds visibility.
-public struct NotchEvent: Identifiable {
+public struct TransientEvent: Identifiable {
     public let id: String
     public let priority: Int
     public let duration: TimeInterval
@@ -22,7 +22,7 @@ public struct NotchEvent: Identifiable {
 /// ponytail: M3 builds the arbitration only (the risky part). M4 wires
 /// `PluginHost.post(event:)` and the panel expansion render — no consumer exists yet.
 @MainActor public final class EventQueue {
-    private struct Entry { let event: NotchEvent; var postedAt: Date; let seq: Int }
+    private struct Entry { let event: TransientEvent; var postedAt: Date; let seq: Int }
     private let now: () -> Date
     private var entries: [Entry] = []
     private var seq = 0
@@ -31,7 +31,7 @@ public struct NotchEvent: Identifiable {
 
     public init(now: @escaping () -> Date = Date.init) { self.now = now }
 
-    public func post(_ event: NotchEvent) {
+    public func post(_ event: TransientEvent) {
         seq += 1
         entries.append(Entry(event: event, postedAt: now(), seq: seq))
     }
@@ -53,7 +53,7 @@ public struct NotchEvent: Identifiable {
         self.holding = holding
     }
 
-    public var current: NotchEvent? {
+    public var current: TransientEvent? {
         guard !holding else { return nil }
         let t = now()
         return entries
