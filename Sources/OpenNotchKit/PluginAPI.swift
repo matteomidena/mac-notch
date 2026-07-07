@@ -1,16 +1,21 @@
 import SwiftUI
 import Observation
 
-public struct PluginManifest: Equatable, Sendable {
+public struct PluginManifest: Equatable, Sendable, Codable {
     public let id: String
     public let name: String
     public let version: String
     public let author: String
-    public init(id: String, name: String, version: String, author: String) {
+    public let apiVersion: String
+    public let bundleName: String
+    public init(id: String, name: String, version: String, author: String,
+                apiVersion: String = "1.0.0", bundleName: String = "") {
         self.id = id
         self.name = name
         self.version = version
         self.author = author
+        self.apiVersion = apiVersion
+        self.bundleName = bundleName
     }
 }
 
