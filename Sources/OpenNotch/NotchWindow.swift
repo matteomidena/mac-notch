@@ -180,9 +180,9 @@ final class NotchController: NSObject {
         case .hidden:
             model.phase = .hidden
             panel.orderOut(nil)
-        case .expanded:
+        case .expanded, .pinned:
             panel.orderFrontRegardless()
-            model.phase = .expanded
+            model.phase = phase
             // Animate the window growing downward from the notch (top edge stays
             // anchored). The black panel fills the window, so the menubar strip is
             // solid from the first frame — no transparent flash. Mirrors the close.
