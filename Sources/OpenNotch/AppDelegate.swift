@@ -69,7 +69,7 @@ final class AppHost: PluginHost {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var host: AppHost?
     private var runtime: PluginRuntime?
-    private var notch: NotchController?
+    private var displays: DisplayCoordinator?
     private var statusItem: NSStatusItem?
     private let launcherStore = LauncherStore()
     private let settings = SettingsWindowController()
@@ -91,12 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MediaPlugin(host: host),
             AppLauncherPlugin(host: host, store: launcherStore),
         ])
-        let notch = NotchController(runtime: runtime, nowPlaying: host.nowPlaying)
-        notch.show()
-
         self.host = host
         self.runtime = runtime
-        self.notch = notch
+        self.displays = DisplayCoordinator(runtime: runtime, nowPlaying: host.nowPlaying)
 
         setUpStatusItem()
     }

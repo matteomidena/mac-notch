@@ -18,6 +18,7 @@ final class NotchController: NSObject {
     private let panelSize = CGSize(width: 600, height: 184)
     private let hoverOutGrace: TimeInterval = 0.2
 
+    private let screen: NSScreen
     private let panel: NotchWindow
     private let hostingView: PassthroughHostingView<NotchShell>
     private let model: NotchViewModel
@@ -34,7 +35,8 @@ final class NotchController: NSObject {
     private var localMonitor: Any?
     private var globalMonitor: Any?
 
-    init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+    init(screen: NSScreen, runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+        self.screen = screen
         self.runtime = runtime
         self.nowPlaying = nowPlaying
         model = NotchViewModel(widgets: runtime.widgets)
@@ -60,9 +62,8 @@ final class NotchController: NSObject {
 
         super.init()
 
-        if let inset = NSScreen.main?.safeAreaInsets.top, inset > 0 { model.topInset = inset }
-        if let screen = NSScreen.main,
-           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+        if screen.safeAreaInsets.top > 0 { model.topInset = screen.safeAreaInsets.top }
+        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             model.notchGap = max(80, screen.frame.width - left.width - right.width) + 6
         }
         model.showAmbient = (nowPlaying.current != nil)
@@ -88,16 +89,12 @@ final class NotchController: NSObject {
 
     /// The one and only window frame: top-center over the notch, never changes.
     private func panelFrame() -> CGRect {
-        guard let screen = NSScreen.main else {
-            return CGRect(origin: .zero, size: panelSize)
-        }
-        return CGRect(x: screen.frame.midX - panelSize.width / 2,
-                      y: screen.frame.maxY - panelSize.height,
-                      width: panelSize.width, height: panelSize.height)
+        CGRect(x: screen.frame.midX - panelSize.width / 2,
+               y: screen.frame.maxY - panelSize.height,
+               width: panelSize.width, height: panelSize.height)
     }
 
     private func notchSize() -> CGSize {
-        guard let screen = NSScreen.main else { return fallbackPillSize }
         let metrics = NotchGeometry.metrics(screenFrame: screen.frame,
                                             topInset: screen.safeAreaInsets.top,
                                             notchWidth: notchWidth,
@@ -238,15 +235,30 @@ final class NotchController: NSObject {
 
     @objc private func evaluateFullscreen() {
         let covered = FullscreenDetector.coversNotch(currentWindows(),
-                                                     mainDisplayFrame: mainDisplayFrameCG())
+                                                     mainDisplayFrame: screenFrameCG())
         guard covered != coveredByFullscreen else { return }
         coveredByFullscreen = covered
         transition(covered ? .enterFullscreen : .exitFullscreen)
     }
 
-    private func mainDisplayFrameCG() -> CGRect {
-        guard let size = NSScreen.main?.frame.size else { return .zero }
-        return CGRect(origin: .zero, size: size)
+    /// This screen's frame in CG (top-left-origin) coordinates, matching the
+    /// window bounds returned by CGWindowListCopyWindowInfo.
+    private func screenFrameCG() -> CGRect {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        return CoordinateSpaces.cgRect(fromAppKit: screen.frame,
+                                       primaryScreenHeight: primaryHeight)
+    }
+
+    func tearDown() {
+        fullscreenPoll?.invalidate()
+        fullscreenPoll = nil
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        localMonitor = nil
+        globalMonitor = nil
+        pendingHoverOut?.cancel()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        panel.orderOut(nil)
     }
 
     private func currentWindows() -> [WindowSnapshot] {
