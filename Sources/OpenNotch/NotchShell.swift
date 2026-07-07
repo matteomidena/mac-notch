@@ -30,10 +30,10 @@ struct NotchPanelShape: Shape {
 }
 
 /// Observable state for the shell. Held once by the controller and mutated in
-/// place so SwiftUI animates the transition internally (rather than us replacing
-/// the whole rootView, which would not animate smoothly).
+/// place so SwiftUI animates transitions internally.
 @Observable @MainActor final class NotchViewModel {
     var phase: NotchPhase = .collapsed
+    var footprint: CGSize = .zero       // current shape size inside the fixed panel
     var widgets: [PluginWidget]
     var quickActions: [QuickAction] = []
     var topInset: CGFloat = 32          // menubar/notch height reserved at the top
@@ -43,6 +43,27 @@ struct NotchPanelShape: Shape {
     @ObservationIgnored var compactLeading: AnyView?
     @ObservationIgnored var compactTrailing: AnyView?
     init(widgets: [PluginWidget]) { self.widgets = widgets }
+
+    /// Island feel (spec M2.0): bouncy open, snappy close. Tuning knobs.
+    var spring: Animation {
+        isOpen ? .spring(response: 0.4, dampingFraction: 0.7)
+               : .spring(response: 0.3, dampingFraction: 0.85)
+    }
+    var isOpen: Bool { phase == .expanded || phase == .pinned }
+}
+
+/// Content materializes with the morph: scale from the top + fade + blur.
+private struct BlurModifier: ViewModifier {
+    let radius: CGFloat
+    func body(content: Content) -> some View { content.blur(radius: radius) }
+}
+private extension AnyTransition {
+    static var notchContent: AnyTransition {
+        .scale(scale: 0.85, anchor: .top)
+            .combined(with: .opacity)
+            .combined(with: .modifier(active: BlurModifier(radius: 6),
+                                      identity: BlurModifier(radius: 0)))
+    }
 }
 
 /// The expanded panel's right column: one pill per plugin-contributed QuickAction.
@@ -80,40 +101,36 @@ struct NotchShell: View {
     let model: NotchViewModel
     var body: some View {
         ZStack(alignment: .top) {
-            // One continuous black panel that fills the window and resizes with it
-            // (the window frame animation drives open/close). Kept OUT of the
-            // content animation so it stays pinned to the notch top edge — no
-            // bounce lag, no gap, no double-shape crossfade on close.
-            NotchPanelShape(topRadius: 10, bottomRadius: 20).fill(.black)
-
+            NotchPanelShape(topRadius: 10, bottomRadius: 20)
+                .fill(.black)
+                .frame(width: model.footprint.width, height: model.footprint.height)
             content
-                .animation(.easeInOut(duration: 0.18), value: model.phase)
-                .animation(.easeInOut(duration: 0.16), value: model.showAmbient)
+                .frame(width: model.footprint.width, height: model.footprint.height,
+                       alignment: .top)
+                .clipped()
         }
+        // One spring drives shape + content together — a single morphing blob.
+        .animation(model.spring, value: model.footprint)
+        .animation(model.spring, value: model.phase)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    /// The inner content that crossfades inside the stable black panel.
     @ViewBuilder private var content: some View {
-        if model.phase == .expanded {
+        if model.isOpen {
             VStack(spacing: 0) {
-                Color.clear.frame(height: model.topInset)     // reserve the notch/menubar strip
+                Color.clear.frame(height: model.topInset)
                 HStack(alignment: .center, spacing: 12) {
-                    ForEach(model.widgets) { $0.content }      // player (left)
+                    ForEach(model.widgets) { $0.content }
                     if !model.quickActions.isEmpty {
                         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
-                        QuickActionsColumn(actions: model.quickActions)   // shortcuts (right)
+                        QuickActionsColumn(actions: model.quickActions)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-                .padding(.top, 4)
+                .padding(.horizontal, 12).padding(.bottom, 8).padding(.top, 4)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .transition(.opacity)
+            .transition(.notchContent)
         } else if model.showAmbient {
-            // Ambient bar: artwork left of the notch, visualizer right, with the
-            // physical notch showing through the transparent middle gap.
             HStack(spacing: 0) {
                 model.compactLeading
                 Spacer(minLength: model.notchGap)
@@ -123,6 +140,5 @@ struct NotchShell: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .transition(.opacity)
         }
-        // collapsed && !showAmbient → no content; the bare black notch shows.
     }
 }
