@@ -98,10 +98,13 @@ public extension PluginHost {
     func compactLeading() -> AnyView?
     func compactTrailing() -> AnyView?
     func quickActions() -> [QuickAction]
+    // Optional settings pane shown under Settings → Plugins. Default nil.
+    func settingsPane() -> AnyView?
 }
 
 public extension NotchPlugin {
     func compactLeading() -> AnyView? { nil }
     func compactTrailing() -> AnyView? { nil }
     func quickActions() -> [QuickAction] { [] }
+    func settingsPane() -> AnyView? { nil }
 }
