@@ -5,6 +5,7 @@ import SwiftUI
 // Test doubles — public API only, no host internals.
 @Observable @MainActor final class FakeNowPlaying: NowPlayingService {
     var current: NowPlayingInfo?
+    var isAvailable = true
     @ObservationIgnored var calls: [String] = []
     func play() { calls.append("play") }
     func pause() { calls.append("pause") }

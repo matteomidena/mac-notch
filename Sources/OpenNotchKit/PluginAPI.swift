@@ -64,6 +64,8 @@ public struct InstalledApp: Identifiable, Equatable, Sendable {
 // now-playing state changes. Conformers must be `@Observable`.
 @MainActor public protocol NowPlayingService: AnyObject, Observable {
     var current: NowPlayingInfo? { get }
+    /// False when the host's media backend is down (adapter kept crashing).
+    var isAvailable: Bool { get }
     func play(); func pause(); func toggle()
     func next(); func previous()
     func seek(to time: TimeInterval)

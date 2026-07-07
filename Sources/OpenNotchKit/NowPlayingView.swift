@@ -70,7 +70,14 @@ public struct NowPlayingView: View {
     }
     public var body: some View {
         let info = service.current
-        return HStack(alignment: .center, spacing: 12) {
+        if !service.isAvailable {
+            return AnyView(
+                Text("Media unavailable")
+                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    .frame(width: 220, height: 60)
+            )
+        }
+        return AnyView(HStack(alignment: .center, spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
                 ArtworkView(data: info?.artworkData, size: 60)
                 Image(systemName: "music.note")           // source badge (generic)
@@ -98,6 +105,6 @@ public struct NowPlayingView: View {
             }
             .frame(width: 150, alignment: .leading)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.white))
     }
 }
