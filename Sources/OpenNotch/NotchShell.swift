@@ -120,7 +120,7 @@ struct NotchShell: View {
             VStack(spacing: 0) {
                 Color.clear.frame(height: model.topInset)
                 HStack(alignment: .center, spacing: 12) {
-                    ForEach(model.widgets) { $0.content }
+                    widgetGrid
                     if !model.quickActions.isEmpty {
                         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
                         QuickActionsColumn(actions: model.quickActions)
@@ -131,14 +131,36 @@ struct NotchShell: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .transition(.notchContent)
         } else if model.showAmbient {
-            HStack(spacing: 0) {
-                model.compactLeading
-                Spacer(minLength: model.notchGap)
-                model.compactTrailing
-            }
-            .padding(.horizontal, 20)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
+            ambientBar
         }
+    }
+
+    // Widgets arranged in the expanded panel's grid. A single wide widget (the
+    // current media case) is one full row → visually unchanged from before.
+    @ViewBuilder private var widgetGrid: some View {
+        let laid = WidgetLayout.arrange(model.widgets.map { ($0.id, $0.size) }, columns: 4)
+        let byRow = Dictionary(grouping: laid, by: \.row).sorted { $0.key < $1.key }
+        VStack(spacing: 8) {
+            ForEach(byRow, id: \.key) { _, cells in
+                HStack(spacing: 8) {
+                    ForEach(cells, id: \.id) { cell in
+                        if let w = model.widgets.first(where: { $0.id == cell.id }) {
+                            w.content
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var ambientBar: some View {
+        HStack(spacing: 0) {
+            model.compactLeading
+            Spacer(minLength: model.notchGap)
+            model.compactTrailing
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.opacity)
     }
 }
