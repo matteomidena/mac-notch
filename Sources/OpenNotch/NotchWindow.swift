@@ -13,7 +13,7 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 404, height: 124)
+    private let expandedSize = CGSize(width: 416, height: 124)
     /// Fixed panel: expanded size + headroom for spring overshoot.
     private let panelSize = CGSize(width: 600, height: 184)
     private let hoverOutGrace: TimeInterval = 0.2
