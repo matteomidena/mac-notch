@@ -162,6 +162,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         host?.invalidateAppCache()
-        settings.show(store: launcherStore, installedApps: host?.installedApps() ?? [])
+        guard let runtime else { return }
+        settings.show(
+            store: launcherStore,
+            installedApps: host?.installedApps() ?? [],
+            runtime: runtime,
+            blockedIds: Array(blocklist?.blocked ?? []).sorted(),
+            onUnblock: { [weak self] id in self?.blocklist?.unblock(id) },
+            onUninstall: { [weak self] id in self?.uninstallPlugin(id) })
+    }
+
+    /// Disable now (dlopened code can't be unloaded) and delete the bundle so it
+    /// won't reload on next launch.
+    private func uninstallPlugin(_ id: String) {
+        runtime?.setEnabled(id, false)
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: PluginsFolder.url, includingPropertiesForKeys: nil) else { return }
+        for dir in entries where dir.pathExtension == "notchplugin" {
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
+                  let manifest = try? parsePluginManifest(data), manifest.id == id else { continue }
+            try? fm.removeItem(at: dir)
+            loadedPluginIds.remove(id)
+        }
     }
 }
