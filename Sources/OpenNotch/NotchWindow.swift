@@ -31,7 +31,8 @@ final class NotchController: NSObject {
     // API + multi-plugin composition lands.
     private let nowPlaying: NowPlayingService
     private var stateMachine = NotchStateMachine()
-    private var trackingArea: NSTrackingArea?
+    private var cursorPoll: Timer?
+    private var cursorInside = false
     private var pendingHoverOut: DispatchWorkItem?
     private var pendingHoverIn: DispatchWorkItem?
     private var coveredByFullscreen = false
@@ -62,7 +63,12 @@ final class NotchController: NSObject {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.contentView = hostingView
-        panel.ignoresMouseEvents = false
+        // Start transparent to clicks; the cursor poll flips this to false only
+        // while the cursor is over the interactive region. A nil hitTest does NOT
+        // pass clicks through to the app below (the window server already picked
+        // this frontmost non-ignoring window), so per-window mouse transparency is
+        // the only thing that actually lets clicks reach what's behind the notch.
+        panel.ignoresMouseEvents = true
 
         super.init()
 
@@ -79,7 +85,7 @@ final class NotchController: NSObject {
         }
 
         applyPhase(stateMachine.phase)
-        installTrackingArea()
+        startCursorTracking()
         installEventMonitors()
         observePlayback()
         observeFullscreen()
@@ -139,7 +145,6 @@ final class NotchController: NSObject {
         model.phase = phase
         model.footprint = currentFootprint()
         if phase == .hidden { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
-        installTrackingArea()   // tracking rect follows the footprint
     }
 
     private func transition(_ event: NotchEvent) {
@@ -176,23 +181,40 @@ final class NotchController: NSObject {
     private func playbackChanged() {
         model.showAmbient = (nowPlaying.current != nil)
         model.footprint = currentFootprint()   // SwiftUI animates the morph
-        installTrackingArea()
     }
 
-    // MARK: - Hover tracking
+    // MARK: - Cursor tracking (hover + click-through)
 
-    private func installTrackingArea() {
-        guard let contentView = panel.contentView else { return }
-        if let trackingArea { contentView.removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: hitRect(),
-                                  options: [.mouseEnteredAndExited, .activeAlways],
-                                  owner: self,
-                                  userInfo: nil)
-        contentView.addTrackingArea(area)
-        trackingArea = area
+    /// The interactive region in screen (bottom-left origin) coordinates — the
+    /// notch when collapsed, the whole panel when open.
+    private func interactiveScreenRect() -> CGRect {
+        let r = hitRect()   // hostingView coords: flipped, y measured from the top
+        let f = panel.frame
+        return CGRect(x: f.minX + r.minX, y: f.maxY - r.maxY,
+                      width: r.width, height: r.height)
     }
 
-    @objc(mouseEntered:) func mouseEntered(with event: NSEvent) {
+    /// Poll the cursor: the tracking-area approach can't work here because the
+    /// window ignores mouse events while over passthrough regions (so it would
+    /// never receive mouseEntered). Reading `NSEvent.mouseLocation` is reliable
+    /// regardless. 60 Hz keeps click-through in sync before the user can click.
+    private func startCursorTracking() {
+        let poll = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateCursorTracking() }
+        }
+        RunLoop.main.add(poll, forMode: .common)
+        cursorPoll = poll
+    }
+
+    private func updateCursorTracking() {
+        let inside = interactiveScreenRect().contains(NSEvent.mouseLocation)
+        panel.ignoresMouseEvents = !inside
+        guard inside != cursorInside else { return }
+        cursorInside = inside
+        if inside { cursorEntered() } else { cursorExited() }
+    }
+
+    private func cursorEntered() {
         pendingHoverOut?.cancel()
         pendingHoverOut = nil
         // Open only if the cursor lingers over the notch — a quick pass-through
@@ -203,7 +225,7 @@ final class NotchController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + hoverInDwell, execute: workItem)
     }
 
-    @objc(mouseExited:) func mouseExited(with event: NSEvent) {
+    private func cursorExited() {
         pendingHoverIn?.cancel()
         pendingHoverIn = nil
         let workItem = DispatchWorkItem { [weak self] in
@@ -302,6 +324,8 @@ final class NotchController: NSObject {
     func tearDown() {
         fullscreenPoll?.invalidate()
         fullscreenPoll = nil
+        cursorPoll?.invalidate()
+        cursorPoll = nil
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
         localMonitor = nil
