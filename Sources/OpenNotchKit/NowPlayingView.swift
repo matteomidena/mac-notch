@@ -102,9 +102,12 @@ public struct NowPlayingView: View {
     // on track/state changes. `vm` carries the transport actions.
     private let service: NowPlayingService
     private let vm: NowPlayingViewModel
-    public init(service: NowPlayingService) {
+    private let appIcon: (String) -> Data?
+    public init(service: NowPlayingService,
+                appIcon: @escaping (String) -> Data? = { _ in nil }) {
         self.service = service
         self.vm = NowPlayingViewModel(service: service)
+        self.appIcon = appIcon
     }
     public var body: some View {
         let info = service.current
@@ -118,11 +121,7 @@ public struct NowPlayingView: View {
         return AnyView(HStack(alignment: .center, spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
                 ArtworkView(data: info?.artworkData, size: 60)
-                Image(systemName: "music.note")           // source badge (generic)
-                    .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 19, height: 19)
-                    .background(Circle().fill(.red))
-                    .overlay(Circle().stroke(.black, lineWidth: 1.5))
+                badge(for: info)
                     .offset(x: 5, y: 5)
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -148,5 +147,21 @@ public struct NowPlayingView: View {
             .frame(width: 150, alignment: .leading)
         }
         .foregroundStyle(.white))
+    }
+
+    @ViewBuilder private func badge(for info: NowPlayingInfo?) -> some View {
+        if let id = info?.sourceBundleId, let data = appIcon(id),
+           let img = NSImage(data: data) {
+            Image(nsImage: img).resizable()
+                .frame(width: 19, height: 19)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(.black, lineWidth: 1.5))
+        } else {
+            Image(systemName: "music.note")
+                .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 19, height: 19)
+                .background(Circle().fill(.red))
+                .overlay(Circle().stroke(.black, lineWidth: 1.5))
+        }
     }
 }

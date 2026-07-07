@@ -6,8 +6,14 @@ import SwiftUI
     private let host: PluginHost
     public init(host: PluginHost) { self.host = host }
     public func widgets() -> [PluginWidget] {
-        [PluginWidget(id: "now-playing", size: .wide,
-                      content: AnyView(NowPlayingView(service: host.nowPlaying)))]
+        let host = self.host
+        return [PluginWidget(id: "now-playing", size: .wide,
+                             content: AnyView(NowPlayingView(
+                                service: host.nowPlaying,
+                                appIcon: { id in
+                                    host.installedApps()
+                                        .first(where: { $0.bundleId == id })?.iconData
+                                })))]
     }
 
     // Ambient-bar contributions: artwork left of the notch, visualizer right.

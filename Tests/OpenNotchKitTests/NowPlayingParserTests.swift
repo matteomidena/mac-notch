@@ -43,3 +43,14 @@ import Foundation
 
     #expect(foundTitle, "At least one parsed line should have a non-nil title")
 }
+
+@Test func parsesSourceBundleId() {
+    let line = #"{"title":"Song","playing":true,"bundleIdentifier":"com.apple.Music"}"#
+    let info = NowPlayingParser.parse(line: line)
+    #expect(info?.sourceBundleId == "com.apple.Music")
+}
+
+@Test func missingBundleIdentifierIsNil() {
+    let info = NowPlayingParser.parse(line: #"{"title":"Song","playing":true}"#)
+    #expect(info?.sourceBundleId == nil)
+}
