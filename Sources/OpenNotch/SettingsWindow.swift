@@ -2,6 +2,9 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "settings")
 
 struct SettingsView: View {
     let store: LauncherStore
@@ -25,7 +28,7 @@ private struct GeneralTab: View {
                         if on { try SMAppService.mainApp.register() }
                         else { try SMAppService.mainApp.unregister() }
                     } catch {
-                        NSLog("OpenNotch: launch at login toggle failed: \(error)")
+                        log.error("launch at login toggle failed: \(error)")
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
                 }

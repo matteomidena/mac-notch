@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "host")
 
 private extension NSImage {
     func pngData(maxPixel: CGFloat = 32) -> Data? {
@@ -27,7 +30,7 @@ final class AppHost: PluginHost {
 
     func launchApp(bundleIdentifier: String) {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
-            NSLog("OpenNotch: no app for bundle id \(bundleIdentifier)")
+            log.error("no app for bundle id \(bundleIdentifier)")
             return
         }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
@@ -63,6 +66,8 @@ final class AppHost: PluginHost {
         cachedApps = sorted
         return sorted
     }
+
+    func invalidateAppCache() { cachedApps = nil }
 }
 
 @MainActor
@@ -116,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
+        host?.invalidateAppCache()
         settings.show(store: launcherStore, installedApps: host?.installedApps() ?? [])
     }
 }

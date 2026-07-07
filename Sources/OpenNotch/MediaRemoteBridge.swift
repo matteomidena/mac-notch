@@ -1,6 +1,9 @@
 import Foundation
 import Observation
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "media")
 
 @Observable @MainActor public final class MediaRemoteBridge: NowPlayingService {
     // Only `current` is observed (drives the SwiftUI widget). Everything else is
@@ -83,12 +86,12 @@ import OpenNotchKit
         guard !stopping else { return }
         switch restartPolicy.recordFailure(at: Date()) {
         case .restart(let delay):
-            NSLog("OpenNotch: adapter stream died; restarting in \(delay)s")
+            log.notice("adapter stream died; restarting in \(delay)s")
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.start()
             }
         case .giveUp:
-            NSLog("OpenNotch: adapter stream keeps dying; media marked unavailable")
+            log.error("adapter stream keeps dying; media marked unavailable")
             current = nil
             isAvailable = false
         }
@@ -123,7 +126,7 @@ import OpenNotchKit
         do {
             try p.run()
         } catch {
-            NSLog("OpenNotch: adapter command failed: \(error)")
+            log.error("adapter command failed: \(error)")
         }
     }
 
