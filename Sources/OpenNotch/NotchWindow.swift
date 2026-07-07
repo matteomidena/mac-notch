@@ -13,7 +13,7 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 400, height: 124)
+    private let expandedSize = CGSize(width: 404, height: 124)
     /// Fixed panel: expanded size + headroom for spring overshoot.
     private let panelSize = CGSize(width: 600, height: 184)
     private let hoverOutGrace: TimeInterval = 0.2
@@ -116,8 +116,19 @@ final class NotchController: NSObject {
                             expandedSize: expandedSize)
     }
 
+    /// The mouse-interactive region. When open, the whole expanded panel (so its
+    /// buttons work). When collapsed, ONLY the physical notch — never the wider
+    /// ambient bar or the empty space the panel *would* occupy — so hovering the
+    /// notch opens it, but clicks anywhere else fall through to what's behind.
+    private func hoverFootprint() -> CGSize {
+        switch stateMachine.phase {
+        case .expanded, .pinned: return model.footprint
+        default: return notchSize()
+        }
+    }
+
     private func hitRect() -> CGRect {
-        NotchFootprint.hitRect(footprint: model.footprint,
+        NotchFootprint.hitRect(footprint: hoverFootprint(),
                                bounds: hostingView.bounds,
                                flipped: hostingView.isFlipped)
     }
@@ -215,11 +226,13 @@ final class NotchController: NSObject {
                 if event.keyCode == 53 { self.transition(.escape) }   // Escape
                 return event
             }
-            if event.window === self.panel {
-                self.transition(.click)
-            } else {
-                self.transition(.clickOutside)
-            }
+            // Only a click that actually lands on the visible notch/panel counts.
+            // event.window == panel is true for the whole oversized frame, incl.
+            // the transparent regions that hitTest passes through — so also check
+            // the click sits inside the interactive rect, else it's "outside".
+            let onNotch = event.window === self.panel
+                && self.hitRect().contains(self.hostingView.convert(event.locationInWindow, from: nil))
+            self.transition(onNotch ? .click : .clickOutside)
             return event
         }
         // Global: clicks in OTHER apps unpin.

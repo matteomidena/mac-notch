@@ -126,7 +126,7 @@ struct NotchShell: View {
                         QuickActionsColumn(actions: model.quickActions)
                     }
                 }
-                .padding(.horizontal, 6).padding(.bottom, 10).padding(.top, 4)
+                .padding(.horizontal, 10).padding(.bottom, 10).padding(.top, 4)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .transition(.notchContent)
