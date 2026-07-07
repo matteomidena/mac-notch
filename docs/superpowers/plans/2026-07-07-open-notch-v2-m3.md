@@ -1684,9 +1684,21 @@ git commit -m "feat: OpenNotchKit SDK library product + plugin template + import
 - [ ] **Run the whole suite:** `swift test` — expect all prior 56 tests + the new kit tests green.
 - [ ] **Build the app bundle:** `./Scripts/make-app.sh` → `build/OpenNotch.app` launches.
 
+### ⚠️ BLOCKER discovered during T13 — shared-runtime linkage (risk #2)
+
+Building the template surfaced a real architectural gap: a kit-linked plugin
+statically embeds its own `OpenNotchKit`, so `dlopen` yields two copies and the
+host↔plugin `as! PluginHost` cast crashes. `OpenNotchKit` is now a **dynamic**
+product (plugin links `@rpath/libOpenNotchKit.dylib`), but the host still embeds a
+static copy because SPM links same-package targets statically. **Third-party
+plugins will not work until the host and plugin share one dylib** — see
+`docs/superpowers/spikes/2026-07-07-m3-risk2-shared-runtime.md` for the fix
+(split OpenNotchKit into its own package + embed the dylib in `.app` with rpath).
+Do this as the first task of the M3 finish. DoD items 1–2 below depend on it.
+
 ### Definition of Done (M3) — walk on hardware
 
-1. **Loader:** template `.notchplugin` in `~/Library/Application Support/OpenNotch/Plugins/` loads on launch; its widget renders in the expanded panel.
+1. **Loader:** template `.notchplugin` in `~/Library/Application Support/OpenNotch/Plugins/` loads on launch; its widget renders in the expanded panel. *(Blocked on risk #2.)*
 2. **Quarantine:** launch the **bundled `OpenNotch.app` from Finder**, drop a freshly-downloaded (still-quarantined) plugin into the folder → strip-on-install clears it and it loads (the one behavior the Terminal spike couldn't cover — see the spike doc's caveat).
 3. **API gate:** a plugin with `apiVersion` major ≠ host is refused and shown with a reason in Settings → Plugins.
 4. **Blocklist:** a plugin that crashes during construct is skipped on next launch and appears as Blocked with a working Unblock action.

@@ -28,3 +28,26 @@ public final class PluginBox {
 @MainActor public func pluginFromBoxPointer(_ p: UnsafeMutableRawPointer) -> NotchPlugin {
     Unmanaged<PluginBox>.fromOpaque(p).takeRetainedValue().plugin
 }
+
+/// SDK helper for the `@_cdecl` entry point — hides the pointer marshalling and
+/// the main-actor hop. A plugin's entry point is a one-liner:
+///
+///     @_cdecl("opennotch_plugin_create")
+///     public func opennotch_plugin_create(_ h: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer {
+///         makePlugin(h) { MyPlugin(host: $0) }
+///     }
+///
+/// The host always calls the entry on the main thread, so re-entering the main
+/// actor here is safe. (We bridge through `UInt` because a raw pointer isn't
+/// `Sendable` and `assumeIsolated` requires a `Sendable` result.)
+public func makePlugin(_ hostPtr: UnsafeMutableRawPointer,
+                       _ build: @MainActor @Sendable (PluginHost) -> NotchPlugin) -> UnsafeMutableRawPointer {
+    // Launder pointers through UInt (Sendable) so nothing non-Sendable is
+    // captured across the main-actor boundary the compiler can't see is safe.
+    let hostAddr = UInt(bitPattern: hostPtr)
+    let addr = MainActor.assumeIsolated {
+        let host = hostFromPointer(UnsafeMutableRawPointer(bitPattern: hostAddr)!)
+        return UInt(bitPattern: Unmanaged.passRetained(PluginBox(build(host))).toOpaque())
+    }
+    return UnsafeMutableRawPointer(bitPattern: addr)!
+}
