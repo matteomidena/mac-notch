@@ -20,39 +20,42 @@ type — so the cast fails and the force-unwrap crashes. This breaks every real
 (kit-linked) plugin. The risk-#1 spike used a *kit-free* fixture, which is why it
 didn't surface there.
 
-## What's fixed so far
+## RESOLVED — via `dynamic_lookup` (owner-approved)
 
-- `OpenNotchKit` is now a **dynamic** library product (`type: .dynamic` in
-  `Package.swift`).
-- The template plugin now links `@rpath/libOpenNotchKit.dylib` instead of
-  embedding the kit (confirmed via `otool -L`).
+The chosen fix keeps the host statically linking `OpenNotchKit` (as always) and
+makes plugins resolve kit symbols **against the running host** instead of embedding
+their own copy:
 
-## What remains (the decision)
+1. **Host exports its symbols.** `Package.swift` adds
+   `linkerSettings: [.unsafeFlags(["-Xlinker", "-export_dynamic"])]` to the
+   `OpenNotch` executable target. Confirmed: `nm -gU` shows the host exports
+   `_$s…OpenNotchKit9PluginBox…` etc.
+2. **Plugins don't embed the kit.** `Templates/PluginTemplate/build.sh` compiles
+   against the kit module (`-I <bin>/Modules`) but links with
+   `-Xlinker -undefined -Xlinker dynamic_lookup` — no `libOpenNotchKit` in the
+   plugin's load commands (confirmed via `otool -L`; only system dylibs remain).
+   Undefined `OpenNotchKit` symbols bind to the host process at `dlopen`.
 
-SPM links a **same-package** target dependency **statically** into the executable,
-so the host `OpenNotch` still embeds its own static `OpenNotchKit` — the plugin's
-`@rpath/libOpenNotchKit.dylib` would resolve to a *different* file → still two copies.
+### Verified end-to-end (dev build, this machine)
 
-To get a single shared instance:
+Installed the real kit-linked template plugin and launched the host:
 
-1. **Split `OpenNotchKit` into its own SPM package** (or make the executable depend
-   on the dynamic *product*, not the target). Then the host links the dynamic
-   `libOpenNotchKit.dylib` too.
-2. **Embed `libOpenNotchKit.dylib` in `OpenNotch.app`** (`Contents/Frameworks/`) and
-   set the host's `LC_RPATH` to `@executable_path/../Frameworks` — update
-   `Scripts/make-app.sh`.
-3. **Plugins resolve to the bundled dylib**: the plugin's `@rpath/libOpenNotchKit.dylib`
-   binds to the host's already-loaded copy (same install name), so no second copy loads.
+```
+loaded com.example.weather widgets=1     # dlopen → box ABI → as! PluginHost cast OK → widgets()
+duplicate-class warnings: 0              # single shared OpenNotchKit runtime
+load marker cleared after run            # clean load, no crash
+```
 
-This is a packaging change that can only be validated by launching the **bundled
-`.app`** and loading a real plugin — owner/on-device territory, like the risk-#1
-quarantine caveat.
+Before the fix: 12+ "Class … implemented in both" warnings and a crash on the cast.
 
-## Recommendation
+### Remaining on-device check (owner)
 
-Do the package split + `make-app.sh` embedding as the **first task of the M3
-finish** (before M4 plugins depend on the loader working). Until then, the loader,
-blocklist, apiVersion gate, folder watch, Settings tab, and all pure-kit logic are
-complete and tested; only the host↔plugin **shared-runtime linkage** is open.
+Confirm the bundled **`OpenNotch.app`** (via `Scripts/make-app.sh`) still exports its
+symbols — i.e. the packaging step doesn't strip them — so a plugin loaded by the
+Finder-launched app resolves the same way. `make-app.sh` currently copies the
+executable as-is (no `strip`), so this should hold; verify by loading the template
+plugin into the packaged app once. This is the only shared-runtime item left, and it
+sits with the risk-#1 quarantine check on the on-device DoD.
 
-Everything else in M3 (Tasks 1–12, plus T13's product/template/contract test) is done.
+M3 is otherwise complete: Tasks 1–13 done, 85 kit tests green, and the full load
+chain proven with a real third-party plugin.

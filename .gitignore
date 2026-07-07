@@ -4,5 +4,7 @@ vendor/mediaremote-adapter/build/
 
 .build/
 build/
+# Plugin build output (produced by Templates/PluginTemplate/build.sh)
+*.notchplugin/
 .swiftpm/
 *.xcodeproj
