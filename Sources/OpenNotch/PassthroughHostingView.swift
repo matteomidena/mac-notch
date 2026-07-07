@@ -5,7 +5,9 @@ import SwiftUI
 /// visible notch shape fall through to whatever is behind the transparent
 /// window region; file drags over the shape report in/out for the FSM.
 final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
-    var interactiveRect: () -> CGRect = { .zero }
+    /// Whether a point (this view's coordinate space) is inside the interactive
+    /// region — full footprint below the menubar, notch-width within it.
+    var interactiveContains: (NSPoint) -> Bool = { _ in false }
     var onDragChange: ((Bool) -> Void)?
     private var dragInside = false
 
@@ -21,7 +23,7 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
     override func hitTest(_ point: NSPoint) -> NSView? {
         // `point` is in the superview's coordinate space.
         let local = convert(point, from: superview)
-        guard interactiveRect().contains(local) else { return nil }
+        guard interactiveContains(local) else { return nil }
         return super.hitTest(point)
     }
 
@@ -40,7 +42,7 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
     }
 
     private func updateDrag(_ sender: NSDraggingInfo) {
-        let inside = interactiveRect().contains(convert(sender.draggingLocation, from: nil))
+        let inside = interactiveContains(convert(sender.draggingLocation, from: nil))
         if inside != dragInside {
             dragInside = inside
             onDragChange?(inside)

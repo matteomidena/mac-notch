@@ -37,6 +37,7 @@ struct NotchPanelShape: Shape {
     var widgets: [PluginWidget]
     var quickActions: [QuickAction] = []
     var topInset: CGFloat = 32          // menubar/notch height reserved at the top
+    var neckWidth: CGFloat = 200        // notch-width neck kept through the menubar strip
     // Ambient bar (collapsed + has media): compact views flank the physical notch.
     var showAmbient = false
     var notchGap: CGFloat = 200         // physical notch width left transparent in the middle
@@ -97,6 +98,23 @@ private struct QuickActionsColumn: View {
     }
 }
 
+/// Masks the panel so it never paints over the menubar items flanking the notch:
+/// within the top `menuBarHeight` strip only the central notch-width neck shows;
+/// below it the panel is full width. Inactive (whole rect) until the panel grows
+/// past the menubar, so the collapsed notch and ambient bar are untouched.
+private struct MenuBarClearMask: Shape {
+    var neckWidth: CGFloat
+    var menuBarHeight: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        guard rect.height > menuBarHeight + 1 else { p.addRect(rect); return p }
+        let half = min(neckWidth, rect.width) / 2
+        p.addRect(CGRect(x: rect.midX - half, y: 0, width: half * 2, height: menuBarHeight))
+        p.addRect(CGRect(x: 0, y: menuBarHeight, width: rect.width, height: rect.height - menuBarHeight))
+        return p
+    }
+}
+
 struct NotchShell: View {
     let model: NotchViewModel
     var body: some View {
@@ -109,6 +127,8 @@ struct NotchShell: View {
                        alignment: .top)
                 .clipped()
         }
+        // Keep the menubar clear on the notch's flanks once expanded.
+        .mask(MenuBarClearMask(neckWidth: model.neckWidth, menuBarHeight: model.topInset))
         // One spring drives shape + content together — a single morphing blob.
         .animation(model.spring, value: model.footprint)
         .animation(model.spring, value: model.phase)

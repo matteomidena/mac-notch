@@ -44,6 +44,7 @@ final class NotchController: NSObject {
         model.compactTrailing = runtime.compactTrailing.first
         model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
+        model.neckWidth = notchWidth
 
         hostingView = PassthroughHostingView(rootView: NotchShell(model: model))
         hostingView.autoresizingMask = [.width, .height]
@@ -69,7 +70,15 @@ final class NotchController: NSObject {
         model.showAmbient = (nowPlaying.current != nil)
 
         panel.setFrame(panelFrame(), display: false)
-        hostingView.interactiveRect = { [weak self] in self?.hitRect() ?? .zero }
+        hostingView.interactiveContains = { [weak self] point in
+            guard let self else { return false }
+            return NotchFootprint.interactiveContains(point, footprint: self.model.footprint,
+                                                      bounds: self.hostingView.bounds,
+                                                      flipped: self.hostingView.isFlipped,
+                                                      neckWidth: self.notchWidth,
+                                                      menuBarHeight: self.model.topInset,
+                                                      clearMenuBar: self.model.isOpen)
+        }
         hostingView.onDragChange = { [weak self] inside in
             self?.transition(inside ? .dragIn : .dragOut)
         }
