@@ -3,5 +3,6 @@
 vendor/mediaremote-adapter/build/
 
 .build/
+build/
 .swiftpm/
 *.xcodeproj
