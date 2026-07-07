@@ -76,6 +76,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var runtime: PluginRuntime?
     private var displays: DisplayCoordinator?
     private var statusItem: NSStatusItem?
+    private var blocklist: PluginBlocklist?
+    private var pluginWatch: DispatchSourceFileSystemObject?
+    private var loadedPluginIds = Set<String>()
     private let launcherStore = LauncherStore(
         storage: UserDefaultsPluginStorage(pluginId: "cafe.notch.launcher"))
     private let settings = SettingsWindowController()
@@ -101,7 +104,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.runtime = runtime
         self.displays = DisplayCoordinator(runtime: runtime, nowPlaying: host.nowPlaying)
 
+        let blocklist = PluginBlocklist(store: DefaultsMarkerStore())
+        self.blocklist = blocklist
+        let loader = PluginLoader()
+        loadInstalledPlugins(host: host, runtime: runtime, loader: loader, blocklist: blocklist)
+        self.pluginWatch = PluginsFolder.watch { [weak self] in
+            guard let self, let host = self.host, let rt = self.runtime, let bl = self.blocklist else { return }
+            self.loadInstalledPlugins(host: host, runtime: rt, loader: loader, blocklist: bl)
+        }
+
         setUpStatusItem()
+    }
+
+    /// Load every `*.notchplugin` in the folder that isn't already loaded or
+    /// blocklisted. Never unloads (dlopened code stays); an update needs a relaunch.
+    private func loadInstalledPlugins(host: AppHost, runtime: PluginRuntime,
+                                      loader: PluginLoader, blocklist: PluginBlocklist) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: PluginsFolder.url, includingPropertiesForKeys: nil) else { return }
+        for dir in entries where dir.pathExtension == "notchplugin" {
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
+                  let manifest = try? parsePluginManifest(data),
+                  !loadedPluginIds.contains(manifest.id),
+                  !blocklist.blocked.contains(manifest.id) else { continue }
+            PluginsFolder.stripQuarantine(dir)
+            blocklist.beginLoad(manifest.id)
+            do {
+                let plugin = try loader.load(pluginDirectory: dir, host: host)
+                runtime.add([plugin])
+                loadedPluginIds.insert(manifest.id)
+                blocklist.endLoad(manifest.id)
+                log.info("loaded plugin \(manifest.id)")
+            } catch {
+                blocklist.endLoad(manifest.id)   // a caught throw is a clean failure, not a crash
+                log.error("failed to load \(manifest.id): \(String(describing: error))")
+            }
+        }
     }
 
     private func setUpStatusItem() {
