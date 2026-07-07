@@ -9,6 +9,7 @@ import OpenNotchKit
     public private(set) var isAvailable = true
     @ObservationIgnored private var restartPolicy = RestartPolicy()
     @ObservationIgnored private var stopping = false
+    @ObservationIgnored private var lastRaw: NowPlayingInfo?
     @ObservationIgnored private let perl = "/usr/bin/perl"
     @ObservationIgnored private let script: String       // vendor/.../mediaremote-adapter.pl
     @ObservationIgnored private let framework: String    // vendor/.../MediaRemoteAdapter.framework
@@ -60,7 +61,14 @@ import OpenNotchKit
                 Task { @MainActor in
                     self.restartPolicy.recordSuccess()
                     self.isAvailable = true
-                    self.current = latest
+                    // De-dup: the --no-diff stream re-sends full snapshots
+                    // (incl. ~80KB artwork); identical payloads must not
+                    // re-trigger every observer.
+                    guard latest != self.lastRaw else { return }
+                    self.lastRaw = latest
+                    var stamped = latest
+                    stamped.timestamp = Date()
+                    self.current = stamped
                 }
             }
         }

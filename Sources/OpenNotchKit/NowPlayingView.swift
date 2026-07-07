@@ -56,6 +56,44 @@ public struct EqualizerBars: View {
     }
 }
 
+/// Progress bar with drag-to-seek. Advances by wall clock between snapshots
+/// (PlaybackProgress); a drag previews the target locally and seeks on release.
+struct ProgressBar: View {
+    let info: NowPlayingInfo
+    let seek: (TimeInterval) -> Void
+    @State private var dragTarget: TimeInterval?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            let duration = info.duration ?? 0
+            let position = dragTarget
+                ?? PlaybackProgress.position(info: info, at: context.date) ?? 0
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.2))
+                    Capsule().fill(.white)
+                        .frame(width: duration > 0
+                               ? geo.size.width * min(position / duration, 1) : 0)
+                }
+                .contentShape(Rectangle().inset(by: -6))   // fat touch target
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard duration > 0 else { return }
+                            let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                            dragTarget = duration * fraction
+                        }
+                        .onEnded { _ in
+                            if let target = dragTarget { seek(target) }
+                            dragTarget = nil
+                        })
+            }
+            .frame(height: 3)
+        }
+        .frame(height: 3)
+    }
+}
+
 /// The player column of the expanded panel: large artwork with a source badge,
 /// title / album / artist, and transport controls.
 public struct NowPlayingView: View {
@@ -94,6 +132,10 @@ public struct NowPlayingView: View {
                     .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
                 Text(info?.artist ?? " ")
                     .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+                if let info, info.duration != nil {
+                    ProgressBar(info: info, seek: vm.seek)
+                        .padding(.top, 4)
+                }
                 HStack(spacing: 18) {
                     Button(action: vm.previous) { Image(systemName: "backward.fill") }
                     Button(action: vm.toggle) {
