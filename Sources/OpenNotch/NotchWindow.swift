@@ -219,17 +219,43 @@ final class NotchController: NSObject {
 
     // MARK: - Fullscreen tracking
 
+    private var pollSuspended = false
+
     private func observeFullscreen() {
-        NSWorkspace.shared.notificationCenter.addObserver(
-            self,
-            selector: #selector(evaluateFullscreen),
-            name: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil)
+        let ws = NSWorkspace.shared.notificationCenter
+        // Immediate triggers: space changes (native fullscreen) and frontmost-app
+        // changes both warrant instant re-evaluation.
+        ws.addObserver(self, selector: #selector(evaluateFullscreen),
+                       name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        ws.addObserver(self, selector: #selector(evaluateFullscreen),
+                       name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        // Poll gating: nothing changes while the display sleeps / session is locked.
+        ws.addObserver(self, selector: #selector(suspendPoll),
+                       name: NSWorkspace.screensDidSleepNotification, object: nil)
+        ws.addObserver(self, selector: #selector(resumePoll),
+                       name: NSWorkspace.screensDidWakeNotification, object: nil)
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(self, selector: #selector(suspendPoll),
+                        name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
+        dnc.addObserver(self, selector: #selector(resumePoll),
+                        name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+
+        // Fallback poll: the ONLY mechanism that catches Chromium in-window video
+        // fullscreen (no notification fires for it). 1s cadence, gated above.
         let poll = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.evaluateFullscreen() }
+            Task { @MainActor in
+                guard let self, !self.pollSuspended else { return }
+                self.evaluateFullscreen()
+            }
         }
         RunLoop.main.add(poll, forMode: .common)
         fullscreenPoll = poll
+        evaluateFullscreen()
+    }
+
+    @objc private func suspendPoll() { pollSuspended = true }
+    @objc private func resumePoll() {
+        pollSuspended = false
         evaluateFullscreen()
     }
 
@@ -258,6 +284,7 @@ final class NotchController: NSObject {
         globalMonitor = nil
         pendingHoverOut?.cancel()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
         panel.orderOut(nil)
     }
 
