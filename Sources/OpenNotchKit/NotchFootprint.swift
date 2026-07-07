@@ -19,23 +19,4 @@ public enum NotchFootprint {
                y: flipped ? bounds.minY : bounds.maxY - footprint.height,
                width: footprint.width, height: footprint.height)
     }
-
-    /// Whether `point` (view coordinates) is inside the *interactive/opaque*
-    /// region. Below the menubar the whole footprint counts; within the top
-    /// `menuBarHeight` strip only the central `neckWidth` (the notch) counts — so
-    /// an expanded panel never captures or covers the menubar items flanking the
-    /// notch. `clearMenuBar` is false while collapsed/ambient, where the whole
-    /// footprint (including the ambient bar in the menubar strip) is interactive.
-    public static func interactiveContains(_ point: CGPoint, footprint: CGSize,
-                                           bounds: CGRect, flipped: Bool,
-                                           neckWidth: CGFloat, menuBarHeight: CGFloat,
-                                           clearMenuBar: Bool) -> Bool {
-        let rect = hitRect(footprint: footprint, bounds: bounds, flipped: flipped)
-        guard rect.contains(point) else { return false }
-        guard clearMenuBar else { return true }
-        let depthFromTop = flipped ? point.y - rect.minY : rect.maxY - point.y
-        if depthFromTop >= menuBarHeight { return true }   // below the menubar → full width
-        let halfNeck = min(neckWidth, footprint.width) / 2
-        return abs(point.x - rect.midX) <= halfNeck
-    }
 }

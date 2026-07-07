@@ -37,7 +37,6 @@ struct NotchPanelShape: Shape {
     var widgets: [PluginWidget]
     var quickActions: [QuickAction] = []
     var topInset: CGFloat = 32          // menubar/notch height reserved at the top
-    var neckWidth: CGFloat = 200        // notch-width neck kept through the menubar strip
     // Ambient bar (collapsed + has media): compact views flank the physical notch.
     var showAmbient = false
     var notchGap: CGFloat = 200         // physical notch width left transparent in the middle
@@ -98,55 +97,17 @@ private struct QuickActionsColumn: View {
     }
 }
 
-/// The expanded silhouette: a notch-width neck through the menubar strip that
-/// flares out with convex shoulders into the full-width, rounded-bottom panel
-/// below. So the panel hangs *below* the menubar and never paints over the
-/// menubar items flanking the notch. Collapsed/ambient footprints (no taller
-/// than the menubar) fall back to the plain notch shape at full width.
-struct ExpandingNotchShape: Shape {
-    var neckWidth: CGFloat
-    var menuBarHeight: CGFloat
-    var bottomRadius: CGFloat = 20
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width, h = rect.height
-        guard h > menuBarHeight + 1 else {
-            return NotchPanelShape(topRadius: 10, bottomRadius: 20).path(in: rect)
-        }
-        let midX = rect.midX
-        let halfN = min(neckWidth, w) / 2
-        let m = menuBarHeight
-        let br = min(bottomRadius, (h - m) / 2)
-        let drop = min(14, h - m - br)          // shoulder vertical drop below the menubar
-        var p = Path()
-        p.move(to: CGPoint(x: midX - halfN, y: 0))
-        p.addLine(to: CGPoint(x: midX + halfN, y: 0))                       // neck top edge
-        p.addLine(to: CGPoint(x: midX + halfN, y: m))                       // neck right wall
-        p.addQuadCurve(to: CGPoint(x: w, y: m + drop),                      // right shoulder flare
-                       control: CGPoint(x: w, y: m))
-        p.addLine(to: CGPoint(x: w, y: h - br))                             // right wall
-        p.addQuadCurve(to: CGPoint(x: w - br, y: h), control: CGPoint(x: w, y: h))
-        p.addLine(to: CGPoint(x: br, y: h))                                 // bottom edge
-        p.addQuadCurve(to: CGPoint(x: 0, y: h - br), control: CGPoint(x: 0, y: h))
-        p.addLine(to: CGPoint(x: 0, y: m + drop))                           // left wall
-        p.addQuadCurve(to: CGPoint(x: midX - halfN, y: m),                  // left shoulder flare
-                       control: CGPoint(x: 0, y: m))
-        p.addLine(to: CGPoint(x: midX - halfN, y: 0))                       // neck left wall
-        p.closeSubpath()
-        return p
-    }
-}
-
 struct NotchShell: View {
     let model: NotchViewModel
     var body: some View {
-        let shape = ExpandingNotchShape(neckWidth: model.neckWidth, menuBarHeight: model.topInset)
         ZStack(alignment: .top) {
-            shape.fill(.black)
+            NotchPanelShape(topRadius: 10, bottomRadius: 20)
+                .fill(.black)
                 .frame(width: model.footprint.width, height: model.footprint.height)
             content
                 .frame(width: model.footprint.width, height: model.footprint.height,
                        alignment: .top)
-                .clipShape(shape)
+                .clipped()
         }
         // One spring drives shape + content together — a single morphing blob.
         .animation(model.spring, value: model.footprint)
@@ -165,7 +126,7 @@ struct NotchShell: View {
                         QuickActionsColumn(actions: model.quickActions)
                     }
                 }
-                .padding(.horizontal, 8).padding(.bottom, 8).padding(.top, 14)
+                .padding(.horizontal, 6).padding(.bottom, 10).padding(.top, 4)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .transition(.notchContent)

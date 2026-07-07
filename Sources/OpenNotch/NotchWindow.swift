@@ -13,7 +13,7 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 430, height: 124)
+    private let expandedSize = CGSize(width: 400, height: 124)
     /// Fixed panel: expanded size + headroom for spring overshoot.
     private let panelSize = CGSize(width: 600, height: 184)
     private let hoverOutGrace: TimeInterval = 0.2
@@ -48,7 +48,6 @@ final class NotchController: NSObject {
         model.compactTrailing = runtime.compactTrailing.first
         model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
-        model.neckWidth = notchWidth
 
         hostingView = PassthroughHostingView(rootView: NotchShell(model: model))
         hostingView.autoresizingMask = [.width, .height]
@@ -74,18 +73,7 @@ final class NotchController: NSObject {
         model.showAmbient = (nowPlaying.current != nil)
 
         panel.setFrame(panelFrame(), display: false)
-        hostingView.interactiveContains = { [weak self] point in
-            guard let self else { return false }
-            // Always keep the menubar strip click-through outside the notch neck,
-            // so menubar items beside the notch (incl. our own status icon) stay
-            // clickable whether the panel is collapsed, ambient, or open.
-            return NotchFootprint.interactiveContains(point, footprint: self.model.footprint,
-                                                      bounds: self.hostingView.bounds,
-                                                      flipped: self.hostingView.isFlipped,
-                                                      neckWidth: self.notchWidth,
-                                                      menuBarHeight: self.model.topInset,
-                                                      clearMenuBar: true)
-        }
+        hostingView.interactiveRect = { [weak self] in self?.hitRect() ?? .zero }
         hostingView.onDragChange = { [weak self] inside in
             self?.transition(inside ? .dragIn : .dragOut)
         }
