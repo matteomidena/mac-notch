@@ -153,7 +153,7 @@ git commit -m "feat: release zip + version single-sourced from OpenNotchKit"
 - Consumes: `Scripts/release.sh` from Task 2.
 - Produces: a draft GitHub Release per `v*` tag, with the zip attached.
 
-- [ ] **Step 1: Write the workflow**
+- [x] **Step 1: Write the workflow**
 
 Two jobs. `test` runs everywhere. `release` runs only on a `v*` tag and asserts the tag matches `OpenNotchKit.version`, so a mistyped tag fails loudly instead of shipping a mislabelled build.
 
@@ -197,7 +197,7 @@ jobs:
             build/OpenNotch-*.zip
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -213,13 +213,13 @@ git commit -m "ci: build + test on push/PR, draft release on v* tag"
 
 The current README is a developer's file: it opens with `swift build`. A downloader needs Install first, and needs the Gatekeeper bypass or the app simply will not open.
 
-- [ ] **Step 1: Restructure**
+- [x] **Step 1: Restructure**
 
 Order: what it is → Install (download, unzip, right-click → Open, why) → Plugins (folder path, pointer to the template) → Building from source → Tests → the existing M2/M3 DoD checklists (kept, they are the release gate).
 
 Gatekeeper section must state: the app is ad-hoc-signed, not notarized; **right-click → Open** the first time (double-click will be refused); `xattr -dr com.apple.quarantine /Applications/OpenNotch.app` as the terminal equivalent.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add README.md
