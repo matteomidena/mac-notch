@@ -15,6 +15,7 @@ public enum NowPlayingParser {
         info.duration = (obj["duration"] as? NSNumber)?.doubleValue
         info.isPlaying = (obj["playing"] as? NSNumber)?.boolValue ?? false
         info.artworkMimeType = obj["artworkMimeType"] as? String
+        info.sourceBundleId = obj["bundleIdentifier"] as? String
         if let b64 = obj["artworkData"] as? String { info.artworkData = Data(base64Encoded: b64) }
         return info
     }

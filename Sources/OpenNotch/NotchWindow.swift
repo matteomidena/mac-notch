@@ -2,42 +2,28 @@ import AppKit
 import SwiftUI
 import OpenNotchKit
 
-/// Borderless, non-activating panel that sits over the physical notch and
-/// expands/collapses in response to hover and fullscreen state.
+/// Borderless, non-activating panel pinned over the notch. Static: created once
+/// at full size and never moved or resized — all animation is SwiftUI inside.
 final class NotchWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-
-    /// When set, `animator().setFrame` uses this spring for the frame animation
-    /// (GPU-driven, real overshoot) instead of the context's timing function.
-    var frameSpring: CASpringAnimation?
-    override func animation(forKey key: NSAnimatablePropertyKey) -> Any? {
-        if key == "frame", let frameSpring { return frameSpring }
-        return super.animation(forKey: key)
-    }
-}
-
-/// Build a `CASpringAnimation` for the window frame from SwiftUI-style params.
-/// `response` = perceptual duration, `damping` = fraction (1 = no overshoot).
-private func frameSpring(response: Double, damping: Double) -> CASpringAnimation {
-    let s = CASpringAnimation(keyPath: "frame")
-    s.mass = 1
-    s.stiffness = pow(2 * .pi / response, 2) * s.mass
-    s.damping = 4 * .pi * damping * s.mass / response
-    s.initialVelocity = 0
-    s.duration = s.settlingDuration
-    return s
 }
 
 @MainActor
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 500, height: 124)
+    private let expandedSize = CGSize(width: 416, height: 124)
+    /// Fixed panel: expanded size + headroom for spring overshoot.
+    private let panelSize = CGSize(width: 600, height: 184)
     private let hoverOutGrace: TimeInterval = 0.2
+    /// Dwell before opening on hover, so a cursor merely passing over the notch
+    /// (e.g. on its way to a menubar item) doesn't fling the panel open.
+    private let hoverInDwell: TimeInterval = 0.14
 
+    private let screen: NSScreen
     private let panel: NotchWindow
-    private let hostingView: NSHostingView<NotchShell>
+    private let hostingView: PassthroughHostingView<NotchShell>
     private let model: NotchViewModel
     private let runtime: PluginRuntime
     // ponytail: the controller observes nowPlaying directly to size the ambient
@@ -45,208 +31,203 @@ final class NotchController: NSObject {
     // API + multi-plugin composition lands.
     private let nowPlaying: NowPlayingService
     private var stateMachine = NotchStateMachine()
-    private var trackingArea: NSTrackingArea?
+    private var cursorPoll: Timer?
+    private var cursorInside = false
     private var pendingHoverOut: DispatchWorkItem?
-    private var hoverUnlock: DispatchWorkItem?
-    // While the open spring settles, its overshoot oscillation wobbles the window
-    // edges across a stationary cursor — which would fire enter/exit repeatedly
-    // and loop open/close. Ignore hover events until it settles, then re-check.
-    private var hoverLocked = false
+    private var pendingHoverIn: DispatchWorkItem?
     private var coveredByFullscreen = false
     private var fullscreenPoll: Timer?
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
 
-    init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+    init(screen: NSScreen, runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+        self.screen = screen
         self.runtime = runtime
         self.nowPlaying = nowPlaying
         model = NotchViewModel(widgets: runtime.widgets)
-        // NOTE: if a live plugin-reload path is added later, it must re-push
-        // compactLeading/compactTrailing (not just widgets) into the model.
         model.compactLeading = runtime.compactLeading.first
         model.compactTrailing = runtime.compactTrailing.first
         model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
 
-        let initialFrame = CGRect(origin: .zero, size: fallbackPillSize)
-        hostingView = NSHostingView(rootView: NotchShell(model: model))
-        hostingView.frame = initialFrame
-        hostingView.autoresizingMask = [.width, .height]  // track the window during resize
+        hostingView = PassthroughHostingView(rootView: NotchShell(model: model))
+        hostingView.autoresizingMask = [.width, .height]
 
-        panel = NotchWindow(contentRect: initialFrame,
-                             styleMask: [.borderless, .nonactivatingPanel],
-                             backing: .buffered,
-                             defer: false)
+        panel = NotchWindow(contentRect: CGRect(origin: .zero, size: panelSize),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered,
+                            defer: false)
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.contentView = hostingView
-        panel.ignoresMouseEvents = false
+        // Start transparent to clicks; the cursor poll flips this to false only
+        // while the cursor is over the interactive region. A nil hitTest does NOT
+        // pass clicks through to the app below (the window server already picked
+        // this frontmost non-ignoring window), so per-window mouse transparency is
+        // the only thing that actually lets clicks reach what's behind the notch.
+        panel.ignoresMouseEvents = true
 
         super.init()
 
-        // Reserve the real notch height (menubar height when there's no notch) so
-        // the expanded content hangs below the notch, not over it.
-        if let inset = NSScreen.main?.safeAreaInsets.top, inset > 0 { model.topInset = inset }
-
-        // Measure the ACTUAL notch width from the areas flanking it, so the
-        // ambient bar's transparent middle gap matches the hardware exactly.
-        if let screen = NSScreen.main,
-           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+        if screen.safeAreaInsets.top > 0 { model.topInset = screen.safeAreaInsets.top }
+        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             model.notchGap = max(80, screen.frame.width - left.width - right.width) + 6
         }
-
         model.showAmbient = (nowPlaying.current != nil)
-        panel.setFrame(collapsedFrame(), display: false)
-        installTrackingArea()
+
+        panel.setFrame(panelFrame(), display: false)
+        hostingView.interactiveRect = { [weak self] in self?.hitRect() ?? .zero }
+        hostingView.onDragChange = { [weak self] inside in
+            self?.transition(inside ? .dragIn : .dragOut)
+        }
+
+        applyPhase(stateMachine.phase)
+        startCursorTracking()
+        installEventMonitors()
         observePlayback()
         observeFullscreen()
         observeQuickActions()
     }
 
-    func show() {
-        panel.orderFrontRegardless()
+    func show() { panel.orderFrontRegardless() }
+    func hide() { panel.orderOut(nil) }
+
+    // MARK: - Geometry (static)
+
+    /// The one and only window frame: top-center over the notch, never changes.
+    private func panelFrame() -> CGRect {
+        CGRect(x: screen.frame.midX - panelSize.width / 2,
+               y: screen.frame.maxY - panelSize.height,
+               width: panelSize.width, height: panelSize.height)
     }
 
-    func hide() {
-        panel.orderOut(nil)
-    }
-
-    // MARK: - Geometry
-
-    private func anchorRect() -> CGRect {
-        guard let screen = NSScreen.main else {
-            return CGRect(origin: .zero, size: fallbackPillSize)
-        }
+    private func notchSize() -> CGSize {
         let metrics = NotchGeometry.metrics(screenFrame: screen.frame,
-                                             topInset: screen.safeAreaInsets.top,
-                                             notchWidth: notchWidth,
-                                             fallbackPillSize: fallbackPillSize)
-        return metrics.anchorRect
+                                            topInset: screen.safeAreaInsets.top,
+                                            notchWidth: notchWidth,
+                                            fallbackPillSize: fallbackPillSize)
+        return metrics.anchorRect.size
     }
 
-    private func expandedRect() -> CGRect {
-        let anchor = anchorRect()
-        let origin = CGPoint(x: anchor.midX - expandedSize.width / 2,
-                              y: anchor.maxY - expandedSize.height)
-        return CGRect(origin: origin, size: expandedSize)
+    private func ambientSize() -> CGSize {
+        CGSize(width: model.notchGap + 94, height: model.topInset)
     }
 
-    /// Collapsed footprint: a wide ambient bar wrapping the notch when there's
-    /// media to show, otherwise the bare notch shape.
-    private func collapsedFrame() -> CGRect {
-        let anchor = anchorRect()
-        guard model.showAmbient else { return anchor }
-        let height = model.topInset                 // stay within the notch/menubar strip
-        let width = model.notchGap + 94             // notch gap + flanking content + side padding
-        let origin = CGPoint(x: anchor.midX - width / 2, y: anchor.maxY - height)
-        return CGRect(origin: origin, size: CGSize(width: width, height: height))
+    private func currentFootprint() -> CGSize {
+        NotchFootprint.size(phase: stateMachine.phase, showAmbient: model.showAmbient,
+                            notchSize: notchSize(), ambientSize: ambientSize(),
+                            expandedSize: expandedSize)
+    }
+
+    /// The mouse-interactive region. When open, the whole expanded panel (so its
+    /// buttons work). When collapsed, ONLY the physical notch — never the wider
+    /// ambient bar or the empty space the panel *would* occupy — so hovering the
+    /// notch opens it, but clicks anywhere else fall through to what's behind.
+    private func hoverFootprint() -> CGSize {
+        switch stateMachine.phase {
+        case .expanded, .pinned: return model.footprint
+        default: return notchSize()
+        }
+    }
+
+    private func hitRect() -> CGRect {
+        NotchFootprint.hitRect(footprint: hoverFootprint(),
+                               bounds: hostingView.bounds,
+                               flipped: hostingView.isFlipped)
+    }
+
+    // MARK: - Phase rendering
+
+    private func applyPhase(_ phase: NotchPhase) {
+        model.phase = phase
+        model.footprint = currentFootprint()
+        if phase == .hidden { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
+    }
+
+    private func transition(_ event: NotchEvent) {
+        let before = stateMachine.phase
+        let after = stateMachine.handle(event)
+        guard after != before else { return }
+        applyPhase(after)
     }
 
     // MARK: - Playback → ambient bar
 
     private func observePlayback() {
         withObservationTracking {
-            _ = nowPlaying.current            // track changes to now-playing state
+            _ = nowPlaying.current
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.playbackChanged()
-                self?.observePlayback()       // re-arm (withObservationTracking is one-shot)
+                self?.observePlayback()
             }
         }
     }
 
     private func observeQuickActions() {
         withObservationTracking {
-            _ = runtime.quickActions            // establishes dependency on store.bundleIds
+            _ = runtime.quickActions
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.model.quickActions = self?.runtime.quickActions ?? []
-                self?.observeQuickActions()     // re-arm (one-shot)
+                self?.observeQuickActions()
             }
         }
     }
 
     private func playbackChanged() {
         model.showAmbient = (nowPlaying.current != nil)
-        // Resize the collapsed footprint live if we're currently collapsed.
-        if stateMachine.phase == .collapsed {
-            panel.setFrame(collapsedFrame(), display: true, animate: true)
-        }
+        model.footprint = currentFootprint()   // SwiftUI animates the morph
     }
 
-    private func applyFrame(for phase: NotchPhase, animated: Bool) {
-        switch phase {
-        case .hidden:
-            model.phase = .hidden
-            panel.orderOut(nil)
-        case .expanded:
-            panel.orderFrontRegardless()
-            model.phase = .expanded
-            // Animate the window growing downward from the notch (top edge stays
-            // anchored). The black panel fills the window, so the menubar strip is
-            // solid from the first frame — no transparent flash. Mirrors the close.
-            let target = expandedRect()
-            if animated {
-                // Dynamic-Island drop: a real spring with overshoot. The top edge
-                // stays pinned (origin.y and height move on one shared fraction).
-                let spring = frameSpring(response: 0.4, damping: 0.62)
-                panel.frameSpring = spring
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = spring.settlingDuration
-                    panel.animator().setFrame(target, display: true)
-                }
-                lockHover(for: min(spring.settlingDuration, 0.55))
-            } else {
-                panel.frameSpring = nil
-                panel.setFrame(target, display: true)
-            }
-        case .collapsed:
-            panel.orderFrontRegardless()
-            model.phase = .collapsed
-            // Retract the window to the collapsed footprint (ambient bar or bare
-            // notch). The panel fills the window, so animating the frame down IS
-            // the close animation — the black panel shrinks smoothly into the notch.
-            let target = collapsedFrame()
-            panel.frameSpring = nil   // keep the smooth easeOut close
-            if animated {
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.26
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    panel.animator().setFrame(target, display: true)
-                }
-            } else {
-                panel.setFrame(target, display: true)
-            }
-        }
+    // MARK: - Cursor tracking (hover + click-through)
+
+    /// The interactive region in screen (bottom-left origin) coordinates — the
+    /// notch when collapsed, the whole panel when open.
+    private func interactiveScreenRect() -> CGRect {
+        let r = hitRect()   // hostingView coords: flipped, y measured from the top
+        let f = panel.frame
+        return CGRect(x: f.minX + r.minX, y: f.maxY - r.maxY,
+                      width: r.width, height: r.height)
     }
 
-    // MARK: - Hover tracking
-
-    private func installTrackingArea() {
-        guard let contentView = panel.contentView else { return }
-        if let trackingArea {
-            contentView.removeTrackingArea(trackingArea)
+    /// Poll the cursor: the tracking-area approach can't work here because the
+    /// window ignores mouse events while over passthrough regions (so it would
+    /// never receive mouseEntered). Reading `NSEvent.mouseLocation` is reliable
+    /// regardless. 60 Hz keeps click-through in sync before the user can click.
+    private func startCursorTracking() {
+        let poll = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateCursorTracking() }
         }
-        let area = NSTrackingArea(rect: contentView.bounds,
-                                   options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                   owner: self,
-                                   userInfo: nil)
-        contentView.addTrackingArea(area)
-        trackingArea = area
+        RunLoop.main.add(poll, forMode: .common)
+        cursorPoll = poll
     }
 
-    // Explicit ObjC selectors: NSTrackingArea sends `mouseEntered:`/`mouseExited:`
-    // to its owner. Swift would otherwise mangle these to `mouseEnteredWith:`.
-    @objc(mouseEntered:) func mouseEntered(with event: NSEvent) {
-        guard !hoverLocked else { return }
+    private func updateCursorTracking() {
+        let inside = interactiveScreenRect().contains(NSEvent.mouseLocation)
+        panel.ignoresMouseEvents = !inside
+        guard inside != cursorInside else { return }
+        cursorInside = inside
+        if inside { cursorEntered() } else { cursorExited() }
+    }
+
+    private func cursorEntered() {
         pendingHoverOut?.cancel()
         pendingHoverOut = nil
-        transition(.hoverIn)
+        // Open only if the cursor lingers over the notch — a quick pass-through
+        // toward the menubar shouldn't trigger it.
+        let workItem = DispatchWorkItem { [weak self] in self?.transition(.hoverIn) }
+        pendingHoverIn?.cancel()
+        pendingHoverIn = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + hoverInDwell, execute: workItem)
     }
 
-    @objc(mouseExited:) func mouseExited(with event: NSEvent) {
-        guard !hoverLocked else { return }
+    private func cursorExited() {
+        pendingHoverIn?.cancel()
+        pendingHoverIn = nil
         let workItem = DispatchWorkItem { [weak self] in
             self?.transition(.hoverOut)
         }
@@ -255,59 +236,105 @@ final class NotchController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + hoverOutGrace, execute: workItem)
     }
 
-    /// Ignore hover events for `duration` (the open spring's settle), then collapse
-    /// if the cursor genuinely left during it — so the overshoot wobble can't loop.
-    private func lockHover(for duration: TimeInterval) {
-        hoverLocked = true
-        hoverUnlock?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.hoverLocked = false
-            if !NSMouseInRect(NSEvent.mouseLocation, self.panel.frame, false) {
-                self.transition(.hoverOut)
+    // MARK: - Click / escape monitors
+
+    private func installEventMonitors() {
+        // Local: clicks on our panel pin it; Escape (when we ever have key
+        // status — e.g. Settings open) unpins. Global keyboard monitoring needs
+        // Accessibility permission, so Escape is best-effort by design (spec M2.5).
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown {
+                if event.keyCode == 53 { self.transition(.escape) }   // Escape
+                return event
             }
+            // Only a click that actually lands on the visible notch/panel counts.
+            // event.window == panel is true for the whole oversized frame, incl.
+            // the transparent regions that hitTest passes through — so also check
+            // the click sits inside the interactive rect, else it's "outside".
+            let onNotch = event.window === self.panel
+                && self.hitRect().contains(self.hostingView.convert(event.locationInWindow, from: nil))
+            self.transition(onNotch ? .click : .clickOutside)
+            return event
         }
-        hoverUnlock = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+        // Global: clicks in OTHER apps unpin.
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] _ in
+            Task { @MainActor in self?.transition(.clickOutside) }
+        }
     }
 
     // MARK: - Fullscreen tracking
 
+    private var pollSuspended = false
+
     private func observeFullscreen() {
-        // NSWindow.didEnter/ExitFullScreenNotification only fire for our OWN
-        // windows, which never go fullscreen — useless here. Native fullscreen
-        // fires activeSpaceDidChange, but Chromium in-window video fullscreen
-        // (a YouTube video) changes nothing observable — so poll the window list.
-        NSWorkspace.shared.notificationCenter.addObserver(
-            self,
-            selector: #selector(evaluateFullscreen),
-            name: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil)
-        // ponytail: 1s poll of the window list — the only mechanism that catches
-        // in-window video fullscreen (no notification fires). Cheap; raise the
-        // cadence if hide-on-fullscreen feels laggy.
+        let ws = NSWorkspace.shared.notificationCenter
+        // Immediate triggers: space changes (native fullscreen) and frontmost-app
+        // changes both warrant instant re-evaluation.
+        ws.addObserver(self, selector: #selector(evaluateFullscreen),
+                       name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        ws.addObserver(self, selector: #selector(evaluateFullscreen),
+                       name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        // Poll gating: nothing changes while the display sleeps / session is locked.
+        ws.addObserver(self, selector: #selector(suspendPoll),
+                       name: NSWorkspace.screensDidSleepNotification, object: nil)
+        ws.addObserver(self, selector: #selector(resumePoll),
+                       name: NSWorkspace.screensDidWakeNotification, object: nil)
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(self, selector: #selector(suspendPoll),
+                        name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
+        dnc.addObserver(self, selector: #selector(resumePoll),
+                        name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+
+        // Fallback poll: the ONLY mechanism that catches Chromium in-window video
+        // fullscreen (no notification fires for it). 1s cadence, gated above.
         let poll = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.evaluateFullscreen() }
+            Task { @MainActor in
+                guard let self, !self.pollSuspended else { return }
+                self.evaluateFullscreen()
+            }
         }
         RunLoop.main.add(poll, forMode: .common)
         fullscreenPoll = poll
-        evaluateFullscreen()   // initial state (e.g. launched into a fullscreen space)
+        evaluateFullscreen()
     }
 
-    /// Snapshot the on-screen windows and edge-trigger hide/show.
+    @objc private func suspendPoll() { pollSuspended = true }
+    @objc private func resumePoll() {
+        pollSuspended = false
+        evaluateFullscreen()
+    }
+
     @objc private func evaluateFullscreen() {
         let covered = FullscreenDetector.coversNotch(currentWindows(),
-                                                     mainDisplayFrame: mainDisplayFrameCG())
+                                                     mainDisplayFrame: screenFrameCG())
         guard covered != coveredByFullscreen else { return }
         coveredByFullscreen = covered
         transition(covered ? .enterFullscreen : .exitFullscreen)
     }
 
-    /// Main display frame in CoreGraphics (top-left origin) coordinates, matching
-    /// the window bounds returned by CGWindowListCopyWindowInfo.
-    private func mainDisplayFrameCG() -> CGRect {
-        guard let size = NSScreen.main?.frame.size else { return .zero }
-        return CGRect(origin: .zero, size: size)
+    /// This screen's frame in CG (top-left-origin) coordinates, matching the
+    /// window bounds returned by CGWindowListCopyWindowInfo.
+    private func screenFrameCG() -> CGRect {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        return CoordinateSpaces.cgRect(fromAppKit: screen.frame,
+                                       primaryScreenHeight: primaryHeight)
+    }
+
+    func tearDown() {
+        fullscreenPoll?.invalidate()
+        fullscreenPoll = nil
+        cursorPoll?.invalidate()
+        cursorPoll = nil
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        localMonitor = nil
+        globalMonitor = nil
+        pendingHoverOut?.cancel()
+        pendingHoverIn?.cancel()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+        panel.orderOut(nil)
     }
 
     private func currentWindows() -> [WindowSnapshot] {
@@ -317,7 +344,6 @@ final class NotchController: NSObject {
             return []
         }
         return infos.compactMap { info in
-            // Only normal-layer windows (layer 0); skip menubar/dock/status items.
             guard (info[kCGWindowLayer as String] as? Int) == 0,
                   let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
@@ -326,12 +352,5 @@ final class NotchController: NSObject {
             let pid = info[kCGWindowOwnerPID as String] as? pid_t
             return WindowSnapshot(frame: bounds, isOwnApp: pid == ownPID)
         }
-    }
-
-    // MARK: - State machine
-
-    private func transition(_ event: NotchEvent) {
-        let newPhase = stateMachine.handle(event)
-        applyFrame(for: newPhase, animated: true)
     }
 }

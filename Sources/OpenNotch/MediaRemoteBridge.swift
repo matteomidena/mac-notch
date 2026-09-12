@@ -1,11 +1,18 @@
 import Foundation
 import Observation
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "media")
 
 @Observable @MainActor public final class MediaRemoteBridge: NowPlayingService {
     // Only `current` is observed (drives the SwiftUI widget). Everything else is
     // implementation detail and excluded from observation.
     public private(set) var current: NowPlayingInfo?
+    public private(set) var isAvailable = true
+    @ObservationIgnored private var restartPolicy = RestartPolicy()
+    @ObservationIgnored private var stopping = false
+    @ObservationIgnored private var lastRaw: NowPlayingInfo?
     @ObservationIgnored private let perl = "/usr/bin/perl"
     @ObservationIgnored private let script: String       // vendor/.../mediaremote-adapter.pl
     @ObservationIgnored private let framework: String    // vendor/.../MediaRemoteAdapter.framework
@@ -53,12 +60,45 @@ import OpenNotchKit
                 self.lineBuffer.removeSubrange(self.lineBuffer.startIndex...nl)
                 if let info = Self.parse(streamLine: lineData) { latest = info }
             }
-            if let latest { Task { @MainActor in self.current = latest } }
+            if let latest {
+                Task { @MainActor in
+                    self.restartPolicy.recordSuccess()
+                    self.isAvailable = true
+                    // De-dup: the --no-diff stream re-sends full snapshots
+                    // (incl. ~80KB artwork); identical payloads must not
+                    // re-trigger every observer.
+                    guard latest != self.lastRaw else { return }
+                    self.lastRaw = latest
+                    var stamped = latest
+                    stamped.timestamp = Date()
+                    self.current = stamped
+                }
+            }
+        }
+        p.terminationHandler = { [weak self] _ in
+            Task { @MainActor in self?.streamEnded() }
         }
         try? p.run(); stream = p
     }
 
+    private func streamEnded() {
+        stream = nil
+        guard !stopping else { return }
+        switch restartPolicy.recordFailure(at: Date()) {
+        case .restart(let delay):
+            log.notice("adapter stream died; restarting in \(delay)s")
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.start()
+            }
+        case .giveUp:
+            log.error("adapter stream keeps dying; media marked unavailable")
+            current = nil
+            isAvailable = false
+        }
+    }
+
     public func stop() {
+        stopping = true
         stream?.terminate()
         stream = nil
     }
@@ -86,7 +126,7 @@ import OpenNotchKit
         do {
             try p.run()
         } catch {
-            NSLog("OpenNotch: adapter command failed: \(error)")
+            log.error("adapter command failed: \(error)")
         }
     }
 

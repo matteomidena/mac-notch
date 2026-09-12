@@ -9,11 +9,16 @@ public struct NowPlayingInfo: Equatable, Sendable {
     public var duration: TimeInterval?
     public var artworkData: Data?
     public var artworkMimeType: String?
+    /// When the host received this snapshot (set by the bridge; nil from the pure parser).
+    public var timestamp: Date?
+    /// Bundle id of the app currently playing (from the adapter payload).
+    public var sourceBundleId: String?
 
     public init(title: String? = nil, artist: String? = nil, album: String? = nil,
                 isPlaying: Bool = false, elapsed: TimeInterval? = nil,
                 duration: TimeInterval? = nil, artworkData: Data? = nil,
-                artworkMimeType: String? = nil) {
+                artworkMimeType: String? = nil, timestamp: Date? = nil,
+                sourceBundleId: String? = nil) {
         self.title = title
         self.artist = artist
         self.album = album
@@ -22,5 +27,7 @@ public struct NowPlayingInfo: Equatable, Sendable {
         self.duration = duration
         self.artworkData = artworkData
         self.artworkMimeType = artworkMimeType
+        self.timestamp = timestamp
+        self.sourceBundleId = sourceBundleId
     }
 }

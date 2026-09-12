@@ -2,16 +2,81 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "settings")
 
 struct SettingsView: View {
     let store: LauncherStore
     let installedApps: [InstalledApp]
+    let runtime: PluginRuntime
+    let blockedIds: [String]
+    let onUnblock: (String) -> Void
+    let onUninstall: (String) -> Void
     var body: some View {
         TabView {
             GeneralTab().tabItem { Label("General", systemImage: "gearshape") }
             ShortcutsTab(store: store, apps: installedApps).tabItem { Label("Shortcuts", systemImage: "bolt") }
+            PluginsTab(runtime: runtime, initialBlocked: blockedIds,
+                       onUnblock: onUnblock, onUninstall: onUninstall)
+                .tabItem { Label("Plugins", systemImage: "puzzlepiece.extension") }
         }
         .frame(width: 460, height: 440)
+    }
+}
+
+private struct PluginsTab: View {
+    let runtime: PluginRuntime
+    let initialBlocked: [String]
+    let onUnblock: (String) -> Void
+    let onUninstall: (String) -> Void
+    @State private var blocked: [String] = []
+    @State private var version = 0        // bump to force the list to re-read the runtime
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !blocked.isEmpty {
+                GroupBox("Blocked (crashed on load)") {
+                    ForEach(blocked, id: \.self) { id in
+                        HStack {
+                            Text(id).font(.callout)
+                            Spacer()
+                            Button("Unblock") { onUnblock(id); blocked.removeAll { $0 == id } }
+                        }
+                    }
+                }
+            }
+            List(runtime.pluginSummaries, id: \.id) { p in
+                HStack {
+                    Toggle(p.name, isOn: Binding(
+                        get: { runtime.isEnabled(p.id) },
+                        set: { runtime.setEnabled(p.id, $0) }))
+                    Spacer()
+                    if p.hasSettings, let pane = runtime.settingsPane(for: p.id) {
+                        SettingsDisclosure(pane: pane)
+                    }
+                    // Uninstall only for third-party (first-party ids start with "cafe.notch.").
+                    if !p.id.hasPrefix("cafe.notch.") {
+                        Button(role: .destructive) {
+                            onUninstall(p.id); version += 1
+                        } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            .id(version)
+        }
+        .padding(20)
+        .onAppear { blocked = initialBlocked }
+    }
+}
+
+private struct SettingsDisclosure: View {
+    let pane: AnyView
+    @State private var open = false
+    var body: some View {
+        Button("Settings…") { open = true }
+            .popover(isPresented: $open) { pane.padding() }
     }
 }
 
@@ -25,7 +90,7 @@ private struct GeneralTab: View {
                         if on { try SMAppService.mainApp.register() }
                         else { try SMAppService.mainApp.unregister() }
                     } catch {
-                        NSLog("OpenNotch: launch at login toggle failed: \(error)")
+                        log.error("launch at login toggle failed: \(error)")
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
                 }
@@ -70,13 +135,18 @@ private struct ShortcutsTab: View {
 
 @MainActor final class SettingsWindowController {
     private var window: NSWindow?
-    func show(store: LauncherStore, installedApps: [InstalledApp]) {
+    func show(store: LauncherStore, installedApps: [InstalledApp],
+              runtime: PluginRuntime, blockedIds: [String],
+              onUnblock: @escaping (String) -> Void,
+              onUninstall: @escaping (String) -> Void) {
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 440),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "OpenNotch Settings"
             w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: SettingsView(store: store, installedApps: installedApps))
+            w.contentView = NSHostingView(rootView: SettingsView(
+                store: store, installedApps: installedApps, runtime: runtime,
+                blockedIds: blockedIds, onUnblock: onUnblock, onUninstall: onUninstall))
             w.center()
             window = w
         }

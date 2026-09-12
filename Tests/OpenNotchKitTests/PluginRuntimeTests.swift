@@ -5,6 +5,7 @@ import SwiftUI
 // Test doubles — public API only, no host internals.
 @Observable @MainActor final class FakeNowPlaying: NowPlayingService {
     var current: NowPlayingInfo?
+    var isAvailable = true
     @ObservationIgnored var calls: [String] = []
     func play() { calls.append("play") }
     func pause() { calls.append("pause") }
@@ -37,6 +38,34 @@ import SwiftUI
     let p = StubPlugin(host: host, sizes: [.small, .wide, .medium])
     let rt = PluginRuntime(host: host, plugins: [p])
     #expect(rt.widgets.map(\.size) == [.wide, .medium, .small])
+}
+
+@MainActor @Test func disabledPluginProducesNoWidgets() {
+    let host = FakeHost()
+    let rt = PluginRuntime(host: host, plugins: [StubPlugin(host: host)])
+    #expect(rt.widgets.count == 1)
+    rt.setEnabled("test.stub", false)
+    #expect(rt.widgets.isEmpty)
+    #expect(rt.isEnabled("test.stub") == false)
+}
+
+@MainActor @Test func enabledStatePersistsAcrossRuntimes() {
+    let store = UserDefaultsPluginStorage(pluginId: "runtime",
+        defaults: UserDefaults(suiteName: "t.\(UUID().uuidString)")!)
+    let host = FakeHost()
+    PluginRuntime(host: host, plugins: [StubPlugin(host: host)], enabledStore: store)
+        .setEnabled("test.stub", false)
+    let rt2 = PluginRuntime(host: host, plugins: [StubPlugin(host: host)], enabledStore: store)
+    #expect(rt2.isEnabled("test.stub") == false)
+    #expect(rt2.widgets.isEmpty)
+}
+
+@MainActor @Test func addMergesThirdPartyPlugins() {
+    let host = FakeHost()
+    let rt = PluginRuntime(host: host, plugins: [])
+    rt.add([StubPlugin(host: host)])
+    #expect(rt.pluginSummaries.contains { $0.id == "test.stub" })
+    #expect(rt.widgets.count == 1)
 }
 
 @MainActor @Test func runtimeCollectsQuickActionsInPluginOrder() {

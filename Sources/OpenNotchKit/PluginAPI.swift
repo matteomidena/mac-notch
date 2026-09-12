@@ -1,16 +1,21 @@
 import SwiftUI
 import Observation
 
-public struct PluginManifest: Equatable, Sendable {
+public struct PluginManifest: Equatable, Sendable, Codable {
     public let id: String
     public let name: String
     public let version: String
     public let author: String
-    public init(id: String, name: String, version: String, author: String) {
+    public let apiVersion: String
+    public let bundleName: String
+    public init(id: String, name: String, version: String, author: String,
+                apiVersion: String = "1.0.0", bundleName: String = "") {
         self.id = id
         self.name = name
         self.version = version
         self.author = author
+        self.apiVersion = apiVersion
+        self.bundleName = bundleName
     }
 }
 
@@ -64,6 +69,8 @@ public struct InstalledApp: Identifiable, Equatable, Sendable {
 // now-playing state changes. Conformers must be `@Observable`.
 @MainActor public protocol NowPlayingService: AnyObject, Observable {
     var current: NowPlayingInfo? { get }
+    /// False when the host's media backend is down (adapter kept crashing).
+    var isAvailable: Bool { get }
     func play(); func pause(); func toggle()
     func next(); func previous()
     func seek(to time: TimeInterval)
@@ -73,6 +80,13 @@ public struct InstalledApp: Identifiable, Equatable, Sendable {
     var nowPlaying: NowPlayingService { get }
     func launchApp(bundleIdentifier: String)
     func installedApps() -> [InstalledApp]
+    func storage(for pluginId: String) -> PluginStorage
+}
+
+public extension PluginHost {
+    func storage(for pluginId: String) -> PluginStorage {
+        UserDefaultsPluginStorage(pluginId: pluginId)
+    }
 }
 
 @MainActor public protocol NotchPlugin {
@@ -84,10 +98,13 @@ public struct InstalledApp: Identifiable, Equatable, Sendable {
     func compactLeading() -> AnyView?
     func compactTrailing() -> AnyView?
     func quickActions() -> [QuickAction]
+    // Optional settings pane shown under Settings → Plugins. Default nil.
+    func settingsPane() -> AnyView?
 }
 
 public extension NotchPlugin {
     func compactLeading() -> AnyView? { nil }
     func compactTrailing() -> AnyView? { nil }
     func quickActions() -> [QuickAction] { [] }
+    func settingsPane() -> AnyView? { nil }
 }

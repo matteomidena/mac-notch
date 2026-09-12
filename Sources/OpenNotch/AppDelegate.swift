@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "host")
 
 private extension NSImage {
     func pngData(maxPixel: CGFloat = 32) -> Data? {
@@ -27,7 +30,7 @@ final class AppHost: PluginHost {
 
     func launchApp(bundleIdentifier: String) {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
-            NSLog("OpenNotch: no app for bundle id \(bundleIdentifier)")
+            log.error("no app for bundle id \(bundleIdentifier)")
             return
         }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
@@ -63,21 +66,29 @@ final class AppHost: PluginHost {
         cachedApps = sorted
         return sorted
     }
+
+    func invalidateAppCache() { cachedApps = nil }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var host: AppHost?
     private var runtime: PluginRuntime?
-    private var notch: NotchController?
+    private var displays: DisplayCoordinator?
     private var statusItem: NSStatusItem?
-    private let launcherStore = LauncherStore()
+    private var blocklist: PluginBlocklist?
+    private var pluginWatch: DispatchSourceFileSystemObject?
+    private var loadedPluginIds = Set<String>()
+    private let launcherStore = LauncherStore(
+        storage: UserDefaultsPluginStorage(pluginId: "cafe.notch.launcher"))
     private let settings = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let bridge = MediaRemoteBridge(
-            script: "vendor/mediaremote-adapter/bin/mediaremote-adapter.pl",
-            framework: "vendor/mediaremote-adapter/build/MediaRemoteAdapter.framework")
+        let paths = AdapterPaths.resolve(
+            bundleResourceURL: Bundle.main.resourceURL,
+            cwd: FileManager.default.currentDirectoryPath,
+            fileExists: { FileManager.default.fileExists(atPath: $0) })
+        let bridge = MediaRemoteBridge(script: paths.script, framework: paths.framework)
         bridge.start()
 
         let host = AppHost(bridge: bridge)
@@ -89,14 +100,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MediaPlugin(host: host),
             AppLauncherPlugin(host: host, store: launcherStore),
         ])
-        let notch = NotchController(runtime: runtime, nowPlaying: host.nowPlaying)
-        notch.show()
-
         self.host = host
         self.runtime = runtime
-        self.notch = notch
+        self.displays = DisplayCoordinator(runtime: runtime, nowPlaying: host.nowPlaying)
+
+        let blocklist = PluginBlocklist(store: DefaultsMarkerStore())
+        self.blocklist = blocklist
+        let loader = PluginLoader()
+        loadInstalledPlugins(host: host, runtime: runtime, loader: loader, blocklist: blocklist)
+        self.pluginWatch = PluginsFolder.watch { [weak self] in
+            guard let self, let host = self.host, let rt = self.runtime, let bl = self.blocklist else { return }
+            self.loadInstalledPlugins(host: host, runtime: rt, loader: loader, blocklist: bl)
+        }
 
         setUpStatusItem()
+    }
+
+    /// Load every `*.notchplugin` in the folder that isn't already loaded or
+    /// blocklisted. Never unloads (dlopened code stays); an update needs a relaunch.
+    private func loadInstalledPlugins(host: AppHost, runtime: PluginRuntime,
+                                      loader: PluginLoader, blocklist: PluginBlocklist) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: PluginsFolder.url, includingPropertiesForKeys: nil) else { return }
+        for dir in entries where dir.pathExtension == "notchplugin" {
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
+                  let manifest = try? parsePluginManifest(data),
+                  !loadedPluginIds.contains(manifest.id),
+                  !blocklist.blocked.contains(manifest.id) else { continue }
+            PluginsFolder.stripQuarantine(dir)
+            blocklist.beginLoad(manifest.id)
+            do {
+                let plugin = try loader.load(pluginDirectory: dir, host: host)
+                runtime.add([plugin])
+                loadedPluginIds.insert(manifest.id)
+                blocklist.endLoad(manifest.id)
+                log.info("loaded plugin \(manifest.id)")
+            } catch {
+                blocklist.endLoad(manifest.id)   // a caught throw is a clean failure, not a crash
+                log.error("failed to load \(manifest.id): \(String(describing: error))")
+            }
+        }
     }
 
     private func setUpStatusItem() {
@@ -117,6 +161,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        settings.show(store: launcherStore, installedApps: host?.installedApps() ?? [])
+        host?.invalidateAppCache()
+        guard let runtime else { return }
+        settings.show(
+            store: launcherStore,
+            installedApps: host?.installedApps() ?? [],
+            runtime: runtime,
+            blockedIds: Array(blocklist?.blocked ?? []).sorted(),
+            onUnblock: { [weak self] id in self?.blocklist?.unblock(id) },
+            onUninstall: { [weak self] id in self?.uninstallPlugin(id) })
+    }
+
+    /// Disable now (dlopened code can't be unloaded) and delete the bundle so it
+    /// won't reload on next launch.
+    private func uninstallPlugin(_ id: String) {
+        runtime?.setEnabled(id, false)
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: PluginsFolder.url, includingPropertiesForKeys: nil) else { return }
+        for dir in entries where dir.pathExtension == "notchplugin" {
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
+                  let manifest = try? parsePluginManifest(data), manifest.id == id else { continue }
+            try? fm.removeItem(at: dir)
+            loadedPluginIds.remove(id)
+        }
     }
 }
