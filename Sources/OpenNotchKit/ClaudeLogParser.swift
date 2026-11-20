@@ -22,11 +22,14 @@ public struct ParsedLogLine: Equatable, Sendable {
 }
 
 /// ISO-8601 with fractional seconds, as both agents write timestamps.
-func parseISODate(_ s: String) -> Date? {
+// ISO8601DateFormatter is thread-safe; it just isn't marked Sendable.
+nonisolated(unsafe) private let isoFormatter: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return f.date(from: s)
-}
+    return f
+}()
+
+func parseISODate(_ s: String) -> Date? { isoFormatter.date(from: s) }
 
 public enum ClaudeLogParser {
     /// nil only when the line is not a JSON object.
