@@ -35,7 +35,7 @@ final class HookInstaller {
             let patched = try ClaudeSettingsPatch.install(into: original, command: command)
             if let original { try backup(original) }
             try fm.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try patched.write(to: settings, options: .atomic)
+            try writeSettings(patched)
             lastError = nil
             log.info("hook installed")
         } catch { fail(error) }
@@ -46,7 +46,7 @@ final class HookInstaller {
         do {
             if let original = try readSettings() {
                 let patched = try ClaudeSettingsPatch.remove(from: original, command: command)
-                try patched.write(to: settings, options: .atomic)
+                try writeSettings(patched)
             }
             lastError = nil
             log.info("hook removed")
@@ -69,8 +69,24 @@ final class HookInstaller {
         FileManager.default.fileExists(atPath: settings.path) ? try Data(contentsOf: settings) : nil
     }
 
+    /// Writes through a symlinked settings.json to its target, keeping the file's permissions.
+    private func writeSettings(_ data: Data) throws {
+        let fm = FileManager.default
+        let target = settings.resolvingSymlinksInPath()
+        let perms = try? fm.attributesOfItem(atPath: target.path)[.posixPermissions]
+        try data.write(to: target, options: .atomic)
+        if let perms { try? fm.setAttributes([.posixPermissions: perms], ofItemAtPath: target.path) }
+    }
+
+    /// Installed only while the script the hook points at still exists. An unreadable file shows as an error.
     private func refresh() {
-        isInstalled = ClaudeSettingsPatch.isInstalled(in: try? Data(contentsOf: settings), command: command)
+        let data: Data?
+        do { data = try readSettings() } catch {
+            lastError = "settings.json could not be read"
+            data = nil
+        }
+        isInstalled = FileManager.default.fileExists(atPath: script.path)
+            && ClaudeSettingsPatch.isInstalled(in: data, command: command)
     }
 
     private func backup(_ original: Data) throws {

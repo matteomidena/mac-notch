@@ -17,6 +17,8 @@ final class AgentUsage: AgentUsageService {
     var threshold = 3.0 { didSet { detector.config.threshold = threshold; evaluate() } }
     var window: TimeInterval = 600 { didSet { let w = window; Task { await watcher?.setRateWindow(w) } } }
 
+    var alertsEnabled = true { didSet { evaluate() } }
+
     @ObservationIgnored private var detector = RunawayDetector()
     @ObservationIgnored private var watcher: AgentWatcher?
     @ObservationIgnored private var sessions: [AgentSession] = []
@@ -57,6 +59,20 @@ final class AgentUsage: AgentUsageService {
         UserDefaults.standard.set(true, forKey: ClaudeUsageClient.connectedKey)
         fetchGate = ClaudeFetchGate()
         fetchClaudeIfDue()
+    }
+
+    /// Settings "Disconnect": stops reading the Keychain and drops the Claude snapshot.
+    func disconnect() {
+        UserDefaults.standard.set(false, forKey: ClaudeUsageClient.connectedKey)
+        claudeLimits = nil
+        publishLimits()
+    }
+
+    /// Applies stored settings. Call after `start()`: a window set before it is lost (no watcher yet).
+    func apply(_ s: AgentSettings) {
+        threshold = s.threshold
+        window = TimeInterval(s.windowMinutes * 60)
+        alertsEnabled = s.alertsEnabled
     }
 
     private func fetchClaudeIfDue() {
@@ -126,7 +142,7 @@ final class AgentUsage: AgentUsageService {
             }
         }
         liveSessions = live
-        alert = best?.0
+        alert = alertsEnabled ? best?.0 : nil
         // The detector measures its hold between update timestamps, and file events can be sparse.
         if alert != nil || hot {
             if reevalTimer == nil {

@@ -85,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launcherStore = LauncherStore(
         storage: UserDefaultsPluginStorage(pluginId: "cafe.notch.launcher"))
     private let settings = SettingsWindowController()
+    private var agentUsage: AgentUsage?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let paths = AdapterPaths.resolve(
@@ -97,6 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let agents = AgentUsage()
         agents.start()
+        agents.apply(AgentSettings.load(from: UserDefaultsPluginStorage(pluginId: "cafe.notch.agents")))
+        agentUsage = agents
         let host = AppHost(bridge: bridge, agents: agents)
         if launcherStore.bundleIds.isEmpty {
             launcherStore.add("com.apple.Safari")
@@ -169,8 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         host?.invalidateAppCache()
-        guard let runtime else { return }
+        guard let runtime, let agentUsage else { return }
         settings.show(
+            agents: agentUsage,
             store: launcherStore,
             installedApps: host?.installedApps() ?? [],
             runtime: runtime,
