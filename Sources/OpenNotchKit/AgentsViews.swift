@@ -189,7 +189,11 @@ public struct RunawayStrip: View {
     }
 
     public var body: some View {
-        if let alert = service.alert { strip(alert) }
+        Group {
+            if let alert = service.alert { strip(alert) }
+        }
+        // Group stays in the hierarchy when the alert goes nil, so this still fires.
+        .onChange(of: service.alert?.session.id) { if redirecting { close() } }
     }
 
     private func strip(_ alert: RunawayAlert) -> some View {
@@ -231,6 +235,7 @@ public struct RunawayStrip: View {
                     TextField("Tell it what to do instead", text: $text)
                         .textFieldStyle(.plain).font(Hex.text(13)).foregroundStyle(Hex.ink)
                         .focused($focused)
+                        .onAppear { focused = true }
                         .onSubmit { send(s.id) }
                         .onKeyPress(.escape) { close(); return .handled }
                     Text("send ↵").font(Hex.mono(12)).foregroundStyle(Hex.muted)
@@ -246,7 +251,7 @@ public struct RunawayStrip: View {
     }
 
     private func open() {
-        redirecting = true; focused = true; onFocusChange(true)
+        redirecting = true; onFocusChange(true)
     }
 
     private func close() {
