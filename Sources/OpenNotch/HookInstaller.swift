@@ -31,7 +31,7 @@ final class HookInstaller {
             try fm.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(Directive.hookScript.utf8).write(to: script, options: .atomic)
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-            let original = try? Data(contentsOf: settings)
+            let original = try readSettings()
             let patched = try ClaudeSettingsPatch.install(into: original, command: command)
             if let original { try backup(original) }
             try fm.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -44,7 +44,7 @@ final class HookInstaller {
 
     func remove() {
         do {
-            if let original = try? Data(contentsOf: settings) {
+            if let original = try readSettings() {
                 let patched = try ClaudeSettingsPatch.remove(from: original, command: command)
                 try patched.write(to: settings, options: .atomic)
             }
@@ -64,6 +64,11 @@ final class HookInstaller {
         } catch { log.error("directive write failed") }
     }
 
+    /// nil only when the file does not exist; an unreadable file throws so nothing gets overwritten.
+    private func readSettings() throws -> Data? {
+        FileManager.default.fileExists(atPath: settings.path) ? try Data(contentsOf: settings) : nil
+    }
+
     private func refresh() {
         isInstalled = ClaudeSettingsPatch.isInstalled(in: try? Data(contentsOf: settings), command: command)
     }
@@ -80,7 +85,7 @@ final class HookInstaller {
         case ClaudeSettingsPatch.PatchError.unexpectedShape: lastError = "settings.json has an unexpected hooks layout"
         case ClaudeSettingsPatch.PatchError.notAJSONObject:
             lastError = "settings.json is not valid JSON"
-        default: lastError = "Could not update settings.json"
+        default: lastError = "settings.json could not be read or written"
         }
         log.error("hook change failed")
     }
