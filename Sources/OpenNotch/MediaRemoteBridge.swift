@@ -139,6 +139,7 @@ private let log = Logger(subsystem: "cafe.notch", category: "media")
     public func toggle() { send(2) }
     public func next() { send(4) }
     public func previous() { send(5) }
+    public func toggleShuffle() { send(6) }
     // "seek" is a separate top-level command taking MICROSECONDS, not "send".
     public func seek(to time: TimeInterval) {
         runAdapter(["seek", String(Int(time * 1_000_000))])

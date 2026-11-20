@@ -13,6 +13,7 @@ import SwiftUI
     func next() { calls.append("next") }
     func previous() { calls.append("previous") }
     func seek(to time: TimeInterval) { calls.append("seek:\(time)") }
+    func toggleShuffle() { calls.append("toggleShuffle") }
 }
 @MainActor final class FakeHost: PluginHost {
     let np = FakeNowPlaying()

@@ -2,14 +2,18 @@ import Testing
 import SwiftUI
 @testable import OpenNotchKit
 
-@MainActor @Test func mediaPluginEmitsOneWideNowPlayingWidget() {
-    let host = FakeHost()
-    let plugin = MediaPlugin(host: host)
-    let ws = plugin.widgets()
-    #expect(ws.count == 1)
-    #expect(ws.first?.id == "now-playing")
-    #expect(ws.first?.size == .wide)
+@MainActor @Test func mediaPluginProvidesMusicTab() {
+    let plugin = MediaPlugin(host: FakeHost())
+    #expect(plugin.tabs().map(\.id) == ["music"])
+    #expect(plugin.widgets().isEmpty)
+    #expect(plugin.compactTrailing() == nil)
     #expect(MediaPlugin.manifest.id == "cafe.notch.media")
+}
+
+@MainActor @Test func shuffleCallsService() {
+    let host = FakeHost()
+    NowPlayingViewModel(service: host.nowPlaying).shuffle()
+    #expect(host.np.calls.contains("toggleShuffle"))
 }
 
 @MainActor @Test func transportButtonsCallHostService() {

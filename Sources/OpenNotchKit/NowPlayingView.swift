@@ -6,6 +6,7 @@ import SwiftUI
     public func toggle() { service.toggle() }
     public func next() { service.next() }
     public func previous() { service.previous() }
+    public func shuffle() { service.toggleShuffle() }
     public func seek(to t: TimeInterval) { service.seek(to: t) }
 }
 
@@ -13,7 +14,10 @@ import SwiftUI
 public struct ArtworkView: View {
     private let data: Data?
     private let size: CGFloat
-    public init(data: Data?, size: CGFloat = 40) { self.data = data; self.size = size }
+    private let cornerRadius: CGFloat?
+    public init(data: Data?, size: CGFloat = 40, cornerRadius: CGFloat? = nil) {
+        self.data = data; self.size = size; self.cornerRadius = cornerRadius
+    }
     public var body: some View {
         Group {
             if let data, let img = NSImage(data: data) {
@@ -24,35 +28,54 @@ public struct ArtworkView: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.18))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius ?? size * 0.18))
     }
 }
 
-/// Decorative audio-level bars that bounce while playing and rest flat when paused.
-/// (Not a real FFT — MediaRemote gives no level data; this is an ambient indicator.)
+/// Fallback when there's no spectrum: 3 bars following a slow blend of sines, each eased
+/// toward its target every frame (the mockup's low-pass). Static under Reduce Motion.
 public struct EqualizerBars: View {
     private let isPlaying: Bool
     private let barHeight: CGFloat
-    private let barCount = 4
+    @State private var eased = Eased()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     public init(isPlaying: Bool, barHeight: CGFloat = 18) {
         self.isPlaying = isPlaying
         self.barHeight = barHeight
     }
+    /// Reference type so frames can ease without mutating @State during `body`.
+    final class Eased { var v = [0.4, 0.6, 0.5] }
     public var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isPlaying)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0,
+                                paused: !isPlaying || reduceMotion)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(0..<barCount, id: \.self) { i in
-                    Capsule().frame(width: 2.5, height: barHeight * height(i: i, t: t))
-                }
-            }
-            .frame(height: barHeight)
+            SpectrumBars(levels: levels(t: t), isPlaying: true, height: barHeight)
         }
     }
-    private func height(i: Int, t: Double) -> Double {
-        guard isPlaying else { return 0.22 }
-        let v = sin(t * 6.0 + Double(i) * 1.7) * 0.5 + 0.5
-        return 0.25 + v * 0.75
+    private func levels(t: Double) -> [Double] {
+        if reduceMotion { return [0.45, 0.75, 0.55] }
+        guard isPlaying else { return [0, 0, 0] }
+        for i in 0..<3 {
+            let d = Double(i)
+            let target = 0.28 + 0.72 * (0.5 + 0.25 * sin(t * (2.1 + d * 0.7) + d * 1.9)
+                                            + 0.25 * sin(t * (3.3 - d * 0.5) + d))
+            eased.v[i] += (target - eased.v[i]) * 0.08
+        }
+        return eased.v
+    }
+}
+
+/// The one place that picks real spectrum vs. the fallback bars.
+struct VisualizerBars: View {
+    let host: PluginHost
+    let height: CGFloat
+    var body: some View {
+        let playing = host.nowPlaying.current?.isPlaying ?? false
+        if host.spectrum.isAvailable {
+            SpectrumBars(levels: host.spectrum.levels, isPlaying: playing, height: height)
+        } else {
+            EqualizerBars(isPlaying: playing, barHeight: height)
+        }
     }
 }
 
@@ -94,74 +117,56 @@ struct ProgressBar: View {
     }
 }
 
-/// The player column of the expanded panel: large artwork with a source badge,
-/// title / album / artist, and transport controls.
-public struct NowPlayingView: View {
-    // Held directly so `body` reads `service.current` inside SwiftUI's observation
-    // scope — the service is `@Observable`, so this read makes the view re-render
-    // on track/state changes. `vm` carries the transport actions.
-    private let service: NowPlayingService
+/// Music tab (mockup 3b): art, title / artist, bars, progress, transport row.
+struct MusicTabView: View {
+    let host: PluginHost
     private let vm: NowPlayingViewModel
-    private let appIcon: (String) -> Data?
-    public init(service: NowPlayingService,
-                appIcon: @escaping (String) -> Data? = { _ in nil }) {
-        self.service = service
-        self.vm = NowPlayingViewModel(service: service)
-        self.appIcon = appIcon
-    }
-    public var body: some View {
+    @Environment(\.openURL) private var openURL
+    init(host: PluginHost) { self.host = host; self.vm = NowPlayingViewModel(service: host.nowPlaying) }
+
+    var body: some View {
+        let service = host.nowPlaying
         let info = service.current
         if !service.isAvailable {
-            return AnyView(
-                Text("Media unavailable")
-                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
-                    .frame(width: 220, height: 60)
-            )
-        }
-        return AnyView(HStack(alignment: .center, spacing: 12) {
-            ZStack(alignment: .bottomTrailing) {
-                ArtworkView(data: info?.artworkData, size: 60)
-                badge(for: info)
-                    .offset(x: 5, y: 5)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(info?.title ?? "Nothing playing")
-                    .font(.system(size: 13, weight: .bold)).lineLimit(1)
-                Text(info?.album ?? " ")
-                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
-                Text(info?.artist ?? " ")
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
-                if let info, info.duration != nil {
-                    ProgressBar(info: info, seek: vm.seek)
-                        .padding(.top, 4)
-                }
-                HStack(spacing: 18) {
-                    Button(action: vm.previous) { Image(systemName: "backward.fill") }
-                    Button(action: vm.toggle) {
-                        Image(systemName: (info?.isPlaying ?? false) ? "pause.fill" : "play.fill")
+            Text("Media unavailable").font(Hex.text(12)).foregroundStyle(Hex.muted)
+                .frame(width: 220, height: 60)
+        } else {
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    ArtworkView(data: info?.artworkData, size: 52, cornerRadius: 10)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(info?.title ?? "Nothing playing").font(Hex.text(14, weight: .semibold))
+                            .foregroundStyle(.white).lineLimit(1)
+                        Text(info?.artist ?? " ").font(Hex.text(13))
+                            .foregroundStyle(.white.opacity(0.55)).lineLimit(1)
                     }
-                    Button(action: vm.next) { Image(systemName: "forward.fill") }
+                    Spacer(minLength: 0)
+                    VisualizerBars(host: host, height: 22).foregroundStyle(musicColor)
                 }
-                .buttonStyle(.plain).font(.system(size: 12)).padding(.top, 3)
+                if let info, info.duration != nil { ProgressBar(info: info, seek: vm.seek) }
+                HStack(spacing: 24) {
+                    button("shuffle", 15, dim: true, vm.shuffle)
+                    button("backward.fill", 18, vm.previous)
+                    button((info?.isPlaying ?? false) ? "pause.fill" : "play.fill", 22, vm.toggle)
+                    button("forward.fill", 18, vm.next)
+                    // ponytail: no public route-picker API for SwiftUI; open Sound settings instead.
+                    button("airplayaudio", 15, dim: true) {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension") {
+                            openURL(url)
+                        }
+                    }
+                }
             }
-            .frame(width: 150, alignment: .leading)
+            .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 16)
+            .frame(maxWidth: 440)
         }
-        .foregroundStyle(.white))
     }
 
-    @ViewBuilder private func badge(for info: NowPlayingInfo?) -> some View {
-        if let id = info?.sourceBundleId, let data = appIcon(id),
-           let img = NSImage(data: data) {
-            Image(nsImage: img).resizable()
-                .frame(width: 19, height: 19)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(.black, lineWidth: 1.5))
-        } else {
-            Image(systemName: "music.note")
-                .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                .frame(width: 19, height: 19)
-                .background(Circle().fill(.red))
-                .overlay(Circle().stroke(.black, lineWidth: 1.5))
-        }
+    private func button(_ icon: String, _ size: CGFloat, dim: Bool = false,
+                        _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: icon).font(.system(size: size)) }
+            .buttonStyle(.plain).foregroundStyle(.white.opacity(dim ? 0.55 : 1))
     }
 }
+
+let musicColor = Color(red: 1, green: 0xB0 / 255, blue: 0x8A / 255)
