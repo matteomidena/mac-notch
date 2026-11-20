@@ -51,9 +51,11 @@ private final class Analysis: @unchecked Sendable {
     private var bands: SpectrumBands
     private var timer: DispatchSourceTimer?
     private var started = DispatchTime.now()
+    private var lastPublished: [Double]?   // queue-only; limits main-actor redraws
 
     init(sampleRate: Double) {
-        bands = SpectrumBands(sampleRate: sampleRate, fftSize: 2048)
+        // ponytail: attack/release are the knobs for jitter (lower) vs. responsiveness (higher).
+        bands = SpectrumBands(sampleRate: sampleRate, fftSize: 2048, attack: 0.2, release: 0.06)
     }
 
     func start(publish: @escaping @Sendable ([Double]) -> Void, silent: @escaping @Sendable () -> Void) {
@@ -69,7 +71,11 @@ private final class Analysis: @unchecked Sendable {
             }
             // ponytail: the 2-12 kHz band sums the most bins, so it reads ~16 dB hot on broadband
             // music; fix with a per-band offset if it looks wrong on the live check.
-            publish(bands.update(magnitudes: analyzer.magnitudes(samples)))
+            let levels = bands.update(magnitudes: analyzer.magnitudes(samples))
+            // Only wake the main actor for a visible change (~1 px on an 18 pt bar).
+            if let last = lastPublished, !zip(levels, last).contains(where: { abs($0 - $1) >= 0.03 }) { return }
+            lastPublished = levels
+            publish(levels)
         }
         timer = t
         t.resume()
