@@ -21,15 +21,20 @@ public struct ParsedLogLine: Equatable, Sendable {
     }
 }
 
+/// ISO-8601 with fractional seconds, as both agents write timestamps.
+func parseISODate(_ s: String) -> Date? {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f.date(from: s)
+}
+
 public enum ClaudeLogParser {
     /// nil only when the line is not a JSON object.
     public static func parse(_ line: String) -> ParsedLogLine? {
         guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { return nil }
         var out = ParsedLogLine()
         if let ts = obj["timestamp"] as? String {
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            out.at = f.date(from: ts)
+            out.at = parseISODate(ts)
         }
         out.cwd = obj["cwd"] as? String
         let message = obj["message"] as? [String: Any]
