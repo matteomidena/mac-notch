@@ -30,6 +30,7 @@ final class NotchController: NSObject {
     // bar. Fine for the single media plugin; generalize when a real compact-widget
     // API + multi-plugin composition lands.
     private let nowPlaying: NowPlayingService
+    private let agents: AgentUsageService
     private var stateMachine = NotchStateMachine()
     private var cursorPoll: Timer?
     private var cursorInside = false
@@ -40,10 +41,11 @@ final class NotchController: NSObject {
     private var localMonitor: Any?
     private var globalMonitor: Any?
 
-    init(screen: NSScreen, runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+    init(screen: NSScreen, runtime: PluginRuntime, nowPlaying: NowPlayingService, agents: AgentUsageService) {
         self.screen = screen
         self.runtime = runtime
         self.nowPlaying = nowPlaying
+        self.agents = agents
         model = NotchViewModel(widgets: runtime.widgets)
         model.compactLeading = runtime.compactLeading.first
         model.compactTrailing = runtime.compactTrailing.first
@@ -153,6 +155,7 @@ final class NotchController: NSObject {
         let after = stateMachine.handle(event)
         guard after != before else { return }
         applyPhase(after)
+        if after == .expanded || after == .pinned { agents.refreshLimits() }  // re-filters stale live sessions
     }
 
     // MARK: - Playback → ambient bar

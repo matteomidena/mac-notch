@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         self.host = host
         self.runtime = runtime
-        self.displays = DisplayCoordinator(runtime: runtime, nowPlaying: host.nowPlaying)
+        self.displays = DisplayCoordinator(runtime: runtime, nowPlaying: host.nowPlaying, agents: host.agents)
 
         let blocklist = PluginBlocklist(store: DefaultsMarkerStore())
         self.blocklist = blocklist

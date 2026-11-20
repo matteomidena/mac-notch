@@ -39,7 +39,8 @@ final class AgentUsage: AgentUsageService {
     func stop(sessionId: String) { acknowledge(sessionId) }
     func redirect(sessionId: String, text: String) { acknowledge(sessionId) }
     func dismiss(sessionId: String) { acknowledge(sessionId) }
-    func refreshLimits() {}
+    /// In-memory only (no IO): drops sessions that went quiet. The Claude usage fetch is added here by the later limits task.
+    func refreshLimits() { evaluate() }
 
     private func acknowledge(_ id: String) {
         let now = Date()
@@ -64,7 +65,7 @@ final class AgentUsage: AgentUsageService {
         for s in live {
             let normal = normalRate[s.agent] ?? 0
             let rate = s.burn.perMinute(at: now)
-            detector.update(sessionId: s.id, rate: rate, weightedTotal: s.weightedTotal, normal: normal, at: now)
+            _ = detector.update(sessionId: s.id, rate: rate, weightedTotal: s.weightedTotal, normal: normal, at: now)
             hot = hot || (normal > 0 && rate >= threshold * normal && s.weightedTotal >= detector.config.floor)
             if detector.isFlagged(s.id), normal > 0, rate / normal > (best?.1 ?? 0) {
                 best = (RunawayAlert(session: s, multiple: rate / normal, normal: normal), rate / normal)
