@@ -98,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let runtime = PluginRuntime(host: host, plugins: [
             MediaPlugin(host: host),
+            AgentsPlugin(host: host),
             AppLauncherPlugin(host: host, store: launcherStore),
         ])
         self.host = host
