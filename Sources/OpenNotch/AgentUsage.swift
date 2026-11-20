@@ -80,6 +80,8 @@ final class AgentUsage: AgentUsageService {
         case .none: log.info("claude usage: no new snapshot")
         case .denied:
             UserDefaults.standard.set(false, forKey: ClaudeUsageClient.connectedKey)
+            claudeLimits = nil
+            publishLimits()
             log.info("claude usage: keychain denied, disconnected")
         }
     }
