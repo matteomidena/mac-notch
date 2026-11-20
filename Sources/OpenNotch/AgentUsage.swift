@@ -11,7 +11,8 @@ final class AgentUsage: AgentUsageService {
     private(set) var liveSessions: [AgentSession] = []
     private(set) var normalRate: [AgentKind: Double] = Baseline.defaultNormal
     private(set) var alert: RunawayAlert?
-    var canControl: Bool { false }  // ponytail: the hook directive write lands in a later task
+    var canControl: Bool { installer.isInstalled }
+    let installer: HookInstaller
 
     var threshold = 3.0 { didSet { detector.config.threshold = threshold; evaluate() } }
     var window: TimeInterval = 600 { didSet { let w = window; Task { await watcher?.setRateWindow(w) } } }
@@ -21,6 +22,8 @@ final class AgentUsage: AgentUsageService {
     @ObservationIgnored private var sessions: [AgentSession] = []
     @ObservationIgnored private var reevalTimer: Task<Void, Never>?
     @ObservationIgnored private var baselineTimer: Task<Void, Never>?
+
+    init(installer: HookInstaller = HookInstaller()) { self.installer = installer }
 
     func start() {
         let w = AgentWatcher { [weak self] snap in Task { @MainActor in self?.apply(snap) } }
@@ -36,11 +39,17 @@ final class AgentUsage: AgentUsageService {
         }
     }
 
-    func stop(sessionId: String) { acknowledge(sessionId) }
-    func redirect(sessionId: String, text: String) { acknowledge(sessionId) }
+    func stop(sessionId: String) { send(.stop, sessionId) }
+    func redirect(sessionId: String, text: String) { send(.redirect(text), sessionId) }
     func dismiss(sessionId: String) { acknowledge(sessionId) }
     /// In-memory only (no IO): drops sessions that went quiet. The Claude usage fetch is added here by the later limits task.
     func refreshLimits() { evaluate() }
+
+    /// Claude only. The hook drops the in-flight tool call on stop, so nothing here promises it finishes.
+    private func send(_ action: DirectiveAction, _ id: String) {
+        if canControl, sessions.first(where: { $0.id == id })?.agent == .claude { installer.write(action, sessionId: id) }
+        acknowledge(id)
+    }
 
     private func acknowledge(_ id: String) {
         let now = Date()
