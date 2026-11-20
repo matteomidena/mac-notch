@@ -36,6 +36,10 @@ struct NotchPanelShape: Shape {
     var footprint: CGSize = .zero       // current shape size inside the fixed panel
     var widgets: [PluginWidget]
     var quickActions: [QuickAction] = []
+    var tabs: [PluginTab] = []
+    var selectedTab: String?
+    /// Set by the controller: re-size the footprint after a tab click (height follows the tab).
+    @ObservationIgnored var onSelectTab: (() -> Void)?
     var topInset: CGFloat = 32          // menubar/notch height reserved at the top
     // Ambient bar (collapsed + has media): compact views flank the physical notch.
     var showAmbient = false
@@ -50,6 +54,18 @@ struct NotchPanelShape: Shape {
                : .spring(response: 0.3, dampingFraction: 0.85)
     }
     var isOpen: Bool { phase == .expanded || phase == .pinned }
+
+    var tabItems: [TabItem] {
+        TabBar.items(providerTabs: tabs.map { TabItem(id: $0.id, title: $0.title, systemImage: $0.systemImage) },
+                     hasWidgets: !widgets.isEmpty, hasQuickActions: !quickActions.isEmpty)
+    }
+    func select(_ id: String) { selectedTab = id; onSelectTab?() }
+
+    /// Panel size per tab: Agents is tall, everything else is the short panel.
+    static let panelWidth: CGFloat = 440
+    static let pillHeight: CGFloat = 36
+    static let pillGap: CGFloat = 8
+    static func panelHeight(forTab id: String?) -> CGFloat { id == "agents" ? 300 : 150 }
 }
 
 /// Content materializes with the morph: scale from the top + fade + blur.
@@ -66,22 +82,22 @@ private extension AnyTransition {
     }
 }
 
-/// The expanded panel's right column: one pill per plugin-contributed QuickAction.
-private struct QuickActionsColumn: View {
+/// The Launcher tab: one pill per plugin-contributed QuickAction, as a grid.
+private struct QuickActionsGrid: View {
     let actions: [QuickAction]
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
     var body: some View {
-        VStack(spacing: 8) {
+        LazyVGrid(columns: columns, spacing: 8) {
             ForEach(actions) { action in
                 Button(action: action.action) {
                     HStack(spacing: 8) {
                         icon(for: action)
                         Text(action.title)
-                            .foregroundStyle(.white).font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white).font(Hex.text(12, weight: .medium))
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 9)
-                    .frame(width: 132)
                     .background(.white.opacity(0.08), in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -97,6 +113,33 @@ private struct QuickActionsColumn: View {
     }
 }
 
+/// Floating tab pill under the panel: the active tab shows icon + title, the rest icon only.
+private struct TabPill: View {
+    let model: NotchViewModel
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(model.tabItems, id: \.id) { item in
+                let active = item.id == model.selectedTab
+                Button { model.select(item.id) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: item.systemImage).font(.system(size: 13))
+                        if active { Text(item.title).font(Hex.text(12, weight: .medium)).lineLimit(1) }
+                    }
+                    .foregroundStyle(active ? Hex.ink : Hex.muted)
+                    .padding(.horizontal, 12).frame(height: NotchViewModel.pillHeight - 8)
+                    .background(active ? Hex.line(0.14) : .clear, in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .frame(height: NotchViewModel.pillHeight)
+        .background(.black, in: Capsule())
+        .overlay(Capsule().strokeBorder(Hex.line(0.10), lineWidth: 1))
+    }
+}
+
 struct NotchShell: View {
     let model: NotchViewModel
     var body: some View {
@@ -108,6 +151,11 @@ struct NotchShell: View {
                 .frame(width: model.footprint.width, height: model.footprint.height,
                        alignment: .top)
                 .clipped()
+            if model.isOpen {
+                TabPill(model: model)
+                    .padding(.top, model.footprint.height + NotchViewModel.pillGap)
+                    .transition(.notchContent)
+            }
         }
         // One spring drives shape + content together — a single morphing blob.
         .animation(model.spring, value: model.footprint)
@@ -119,14 +167,9 @@ struct NotchShell: View {
         if model.isOpen {
             VStack(spacing: 0) {
                 Color.clear.frame(height: model.topInset)
-                HStack(alignment: .center, spacing: 12) {
-                    widgetGrid
-                    if !model.quickActions.isEmpty {
-                        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 60)
-                        QuickActionsColumn(actions: model.quickActions)
-                    }
-                }
-                .padding(.horizontal, 16).padding(.bottom, 10).padding(.top, 4)
+                tabContent
+                    .padding(.horizontal, 16).padding(.bottom, 10).padding(.top, 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .transition(.notchContent)
@@ -135,8 +178,16 @@ struct NotchShell: View {
         }
     }
 
-    // Widgets arranged in the expanded panel's grid. A single wide widget (the
-    // current media case) is one full row → visually unchanged from before.
+    @ViewBuilder private var tabContent: some View {
+        switch model.selectedTab {
+        case "widgets": ScrollView { widgetGrid }
+        case "launcher": ScrollView { QuickActionsGrid(actions: model.quickActions) }
+        default:
+            if let tab = model.tabs.first(where: { $0.id == model.selectedTab }) { tab.content }
+        }
+    }
+
+    // Widgets arranged in a grid. A single wide widget is one full row.
     @ViewBuilder private var widgetGrid: some View {
         let laid = WidgetLayout.arrange(model.widgets.map { ($0.id, $0.size) }, columns: 4)
         let byRow = Dictionary(grouping: laid, by: \.row).sorted { $0.key < $1.key }

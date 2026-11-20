@@ -13,6 +13,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp .build/release/OpenNotch "$APP/Contents/MacOS/OpenNotch"
 cp -R vendor/mediaremote-adapter "$APP/Contents/Resources/mediaremote-adapter"
+cp -R vendor/inter "$APP/Contents/Resources/inter"   # InterVariable.ttf + OFL.txt
 # Trim non-runtime vendor files from the bundle.
 rm -rf "$APP/Contents/Resources/mediaremote-adapter/.vscode" \
        "$APP/Contents/Resources/mediaremote-adapter/.git" 2>/dev/null || true

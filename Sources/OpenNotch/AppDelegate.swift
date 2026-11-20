@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 import OpenNotchKit
 import os
@@ -90,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bundleResourceURL: Bundle.main.resourceURL,
             cwd: FileManager.default.currentDirectoryPath,
             fileExists: { FileManager.default.fileExists(atPath: $0) })
+        CTFontManagerRegisterFontsForURL(URL(fileURLWithPath: paths.interFont) as CFURL, .process, nil)
         let bridge = MediaRemoteBridge(script: paths.script, framework: paths.framework)
         bridge.start()
 
@@ -101,8 +103,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launcherStore.add("com.apple.iCal")     // Calendar
         }
         let runtime = PluginRuntime(host: host, plugins: [
-            MediaPlugin(host: host),
             AgentsPlugin(host: host),
+            MediaPlugin(host: host),
             AppLauncherPlugin(host: host, store: launcherStore),
         ])
         self.host = host

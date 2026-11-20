@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "window")
 
 /// Borderless, non-activating panel pinned over the notch. Static: created once
 /// at full size and never moved or resized — all animation is SwiftUI inside.
@@ -13,9 +16,9 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 416, height: 124)
-    /// Fixed panel: expanded size + headroom for spring overshoot.
-    private let panelSize = CGSize(width: 600, height: 184)
+    /// Fixed window: tallest panel (Agents 300) + 8 pt gap + 36 pt pill + spring headroom.
+    private let panelSize = CGSize(width: 520, height: 300 + NotchViewModel.pillGap + NotchViewModel.pillHeight + 40)
+    private static var loggedAmbient = false
     private let hoverOutGrace: TimeInterval = 0.2
     /// Dwell before opening on hover, so a cursor merely passing over the notch
     /// (e.g. on its way to a menubar item) doesn't fling the panel open.
@@ -51,6 +54,7 @@ final class NotchController: NSObject {
         model.compactTrailing = runtime.compactTrailing.first
         model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
+        model.tabs = runtime.tabs
 
         hostingView = PassthroughHostingView(rootView: NotchShell(model: model))
         hostingView.autoresizingMask = [.width, .height]
@@ -78,7 +82,15 @@ final class NotchController: NSObject {
         if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             model.notchGap = max(80, screen.frame.width - left.width - right.width) + 6
         }
-        model.showAmbient = (nowPlaying.current != nil)
+        model.showAmbient = ambientWanted()
+        model.onSelectTab = { [weak self] in
+            guard let self else { return }
+            self.model.footprint = self.currentFootprint()
+        }
+        if !Self.loggedAmbient {
+            Self.loggedAmbient = true
+            log.info("ambient width \(Double(self.ambientSize().width))")
+        }
 
         panel.setFrame(panelFrame(), display: false)
         hostingView.interactiveRect = { [weak self] in self?.hitRect() ?? .zero }
@@ -115,7 +127,17 @@ final class NotchController: NSObject {
     }
 
     private func ambientSize() -> CGSize {
-        CGSize(width: model.notchGap + 94, height: model.topInset)
+        CGSize(width: model.notchGap + 80, height: model.topInset)
+    }
+
+    /// Ambient bar shows when media is present or any plan limit exists.
+    private func ambientWanted() -> Bool {
+        nowPlaying.current != nil || !agents.limits.isEmpty
+    }
+
+    private var expandedSize: CGSize {
+        CGSize(width: NotchViewModel.panelWidth,
+               height: NotchViewModel.panelHeight(forTab: model.selectedTab))
     }
 
     private func currentFootprint() -> CGSize {
@@ -131,7 +153,9 @@ final class NotchController: NSObject {
     /// notch opens it, but clicks anywhere else fall through to what's behind.
     private func hoverFootprint() -> CGSize {
         switch stateMachine.phase {
-        case .expanded, .pinned: return model.footprint
+        case .expanded, .pinned:   // panel + gap + pill
+            return CGSize(width: model.footprint.width,
+                          height: model.footprint.height + NotchViewModel.pillGap + NotchViewModel.pillHeight)
         default: return notchSize()
         }
     }
@@ -154,6 +178,16 @@ final class NotchController: NSObject {
         let before = stateMachine.phase
         let after = stateMachine.handle(event)
         guard after != before else { return }
+        let isOpen = after == .expanded || after == .pinned
+        if isOpen && !(before == .expanded || before == .pinned) {
+            // Each open starts on the default tab; a click then sticks until close.
+            model.tabs = runtime.tabs
+            model.widgets = runtime.widgets
+            model.quickActions = runtime.quickActions
+            model.selectedTab = TabBar.defaultTab(model.tabItems,
+                                                  hasLiveSession: !agents.liveSessions.isEmpty,
+                                                  isPlaying: nowPlaying.current?.isPlaying ?? false)
+        }
         applyPhase(after)
         if after == .expanded || after == .pinned { agents.refreshLimits() }  // re-filters stale live sessions
     }
@@ -163,6 +197,7 @@ final class NotchController: NSObject {
     private func observePlayback() {
         withObservationTracking {
             _ = nowPlaying.current
+            _ = agents.limits
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.playbackChanged()
@@ -183,7 +218,7 @@ final class NotchController: NSObject {
     }
 
     private func playbackChanged() {
-        model.showAmbient = (nowPlaying.current != nil)
+        model.showAmbient = ambientWanted()
         model.footprint = currentFootprint()   // SwiftUI animates the morph
     }
 
