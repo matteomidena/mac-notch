@@ -8,9 +8,9 @@ public enum Hex {
     public static let code = Color(red: 0xB9 / 255, green: 0xBB / 255, blue: 0xC0 / 255)
     /// Hairlines: ink at .07 / .10 / .14.
     public static func line(_ opacity: Double) -> Color { ink.opacity(opacity) }
-    // Inter isn't bundled yet; `.custom` falls back to the system font until it is.
+    // The v4.1 variable TTF registers as "Inter Variable"; falls back to system if unregistered.
     public static func text(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("Inter", size: size).weight(weight)
+        .custom("Inter Variable", size: size).weight(weight)
     }
     public static func mono(_ size: CGFloat) -> Font { .system(size: size, design: .monospaced) }
 }

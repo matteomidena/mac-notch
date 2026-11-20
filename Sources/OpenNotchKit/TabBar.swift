@@ -17,8 +17,8 @@ public enum TabBar {
 
     public static func defaultTab(_ items: [TabItem], hasLiveSession: Bool, isPlaying: Bool) -> String? {
         guard let first = items.first else { return nil }
-        if hasLiveSession { return "agents" }
-        if isPlaying { return "music" }
+        if hasLiveSession, items.contains(where: { $0.id == "agents" }) { return "agents" }
+        if isPlaying, items.contains(where: { $0.id == "music" }) { return "music" }
         return first.id
     }
 }

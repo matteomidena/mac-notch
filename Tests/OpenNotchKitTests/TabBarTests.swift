@@ -21,3 +21,9 @@ private let music = TabItem(id: "music", title: "Music", systemImage: "m")
     #expect(TabBar.defaultTab([agents], hasLiveSession: false, isPlaying: false) == "agents")
     #expect(TabBar.defaultTab([], hasLiveSession: true, isPlaying: true) == nil)
 }
+
+@Test func tabBarDefaultTabIgnoresMissingMembers() {
+    let items = [TabItem(id: "widgets", title: "W", systemImage: "w"), music]
+    #expect(TabBar.defaultTab(items, hasLiveSession: true, isPlaying: false) == "widgets")
+    #expect(TabBar.defaultTab([agents], hasLiveSession: false, isPlaying: true) == "agents")
+}
