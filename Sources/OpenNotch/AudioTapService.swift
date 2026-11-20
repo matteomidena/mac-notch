@@ -54,8 +54,9 @@ private final class Analysis: @unchecked Sendable {
     private var lastPublished: [Double]?   // queue-only; limits main-actor redraws
 
     init(sampleRate: Double) {
-        // ponytail: attack/release are the knobs for jitter (lower) vs. responsiveness (higher).
-        bands = SpectrumBands(sampleRate: sampleRate, fftSize: 2048, attack: 0.2, release: 0.06)
+        // ponytail: attack/release are the knobs for jitter (lower) vs. responsiveness (higher);
+        // chosen for very smooth motion over rhythm accuracy, per the owner.
+        bands = SpectrumBands(sampleRate: sampleRate, fftSize: 2048, attack: 0.08, release: 0.05)
     }
 
     func start(publish: @escaping @Sendable ([Double]) -> Void, silent: @escaping @Sendable () -> Void) {
