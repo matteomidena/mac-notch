@@ -8,6 +8,13 @@ private let log = Logger(subsystem: "cafe.notch", category: "window")
 /// Borderless, non-activating panel pinned over the notch. Static: created once
 /// at full size and never moved or resized — all animation is SwiftUI inside.
 final class NotchWindow: NSPanel {
+    /// Claude's menu-bar template icon from the installed desktop app, read-only; empty if absent.
+    static func claudeMark() -> [AgentKind: Image] {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop"),
+              let img = Bundle(url: url)?.image(forResource: "TrayIconTemplate") else { return [:] }
+        img.isTemplate = true
+        return [.claude: Image(nsImage: img)]
+    }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
@@ -56,7 +63,7 @@ final class NotchController: NSObject {
         model.notchGap = notchWidth
         model.tabs = runtime.tabs
 
-        hostingView = PassthroughHostingView(rootView: NotchShell(model: model))
+        hostingView = PassthroughHostingView(rootView: NotchShell(model: model, agentMarks: NotchWindow.claudeMark()))
         hostingView.autoresizingMask = [.width, .height]
 
         panel = NotchWindow(contentRect: CGRect(origin: .zero, size: panelSize),

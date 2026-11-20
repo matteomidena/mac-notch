@@ -28,7 +28,10 @@ struct AgentsFigure: View {
 struct Tag: View {
     let agent: AgentKind
     var body: some View {
-        Text(agent.rawValue).font(Hex.mono(10)).foregroundStyle(Hex.code)
+        HStack(spacing: 4) {
+            AgentMark(agent: agent, size: 9)
+            Text(agent.rawValue).font(Hex.mono(10)).foregroundStyle(Hex.code)
+        }
             .padding(.horizontal, 5).padding(.vertical, 3)
             .overlay(RoundedRectangle(cornerRadius: 5.6).stroke(Hex.line(0.14), lineWidth: 1))
     }
@@ -78,6 +81,7 @@ struct AgentsTabView: View {
                     ForEach(claude.windows, id: \.label) { limitRow("Claude · \($0.label)", $0, now, age: limitAgeText(fetchedAt: claude.fetchedAt, now: now)) }
                 } else {
                     row {
+                        AgentMark(agent: .claude, size: 11)
                         Text("Claude").font(Hex.text(12.5)).foregroundStyle(Hex.muted)
                         Spacer()
                         Text("—").font(Hex.mono(12)).foregroundStyle(Hex.ink)
@@ -112,7 +116,10 @@ struct AgentsTabView: View {
         let pct = w.percent(at: now)
         let filled = Int((pct / 10).rounded())
         return row {
-            Text(title).font(Hex.text(12.5)).foregroundStyle(Hex.muted)
+            HStack(spacing: 6) {
+                AgentMark(agent: title.hasPrefix("Claude") ? .claude : .codex, size: 11)
+                Text(title).font(Hex.text(12.5)).foregroundStyle(Hex.muted)
+            }
             Spacer()
             if let age { Text(age).font(Hex.text(11)).foregroundStyle(Hex.muted) }
             HStack(spacing: 2) {

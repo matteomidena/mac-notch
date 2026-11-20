@@ -11,7 +11,7 @@ import Foundation
         .appendingPathComponent("Sources/OpenNotchKit")
     let files = ["PluginAPI.swift", "PluginBox.swift", "EventQueue.swift", "WidgetLayout.swift",
                  "HostServices.swift", "TabBar.swift", "AgentModel.swift", "AgentSessions.swift",
-                 "HexStyle.swift", "AgentsPlugin.swift", "AgentsViews.swift", "AgentsLayout.swift", "AgentSettings.swift"]
+                 "HexStyle.swift", "AgentsPlugin.swift", "AgentsViews.swift", "AgentsLayout.swift", "AgentSettings.swift", "AgentMark.swift"]
     for f in files {
         let src = try String(contentsOf: kit.appendingPathComponent(f), encoding: .utf8)
         let imports = src.split(separator: "\n")

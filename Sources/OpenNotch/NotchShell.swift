@@ -145,6 +145,7 @@ private struct TabPill: View {
 
 struct NotchShell: View {
     let model: NotchViewModel
+    var agentMarks: [AgentKind: Image] = [:]
     var body: some View {
         ZStack(alignment: .top) {
             NotchPanelShape(topRadius: 10, bottomRadius: model.isOpen ? 20 : 12)
@@ -164,6 +165,7 @@ struct NotchShell: View {
         .animation(model.spring, value: model.footprint)
         .animation(model.spring, value: model.phase)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.agentMarkImages, agentMarks)
     }
 
     @ViewBuilder private var content: some View {
