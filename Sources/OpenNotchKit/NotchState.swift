@@ -1,9 +1,10 @@
-public enum NotchPhase: Equatable { case collapsed, expanded, pinned, hidden }
+public enum NotchPhase: Equatable { case collapsed, expanded, pinned, hidden, alert }
 public enum NotchEvent: Equatable {
     case hoverIn, hoverOut
     case click, clickOutside, escape
     case dragIn, dragOut
     case enterFullscreen, exitFullscreen
+    case alertRaised, alertFolded, alertClosed
 }
 
 public struct NotchStateMachine {
@@ -11,6 +12,16 @@ public struct NotchStateMachine {
     public init(phase: NotchPhase = .collapsed) { self.phase = phase }
 
     public mutating func handle(_ event: NotchEvent) -> NotchPhase {
+        // The alert strip owns hover and clicks: only the alert/escape/fullscreen
+        // events leave it, everything else is ignored while it is showing.
+        if phase == .alert {
+            switch event {
+            case .alertFolded, .alertClosed, .escape, .exitFullscreen: phase = .collapsed
+            case .enterFullscreen: phase = .hidden
+            default: break
+            }
+            return phase
+        }
         switch event {
         case .enterFullscreen: phase = .hidden
         case .exitFullscreen:  phase = .collapsed
@@ -24,6 +35,8 @@ public struct NotchStateMachine {
             if phase == .expanded || phase == .pinned { phase = .collapsed }
         case .dragIn:  if phase == .collapsed { phase = .expanded }
         case .dragOut: if phase == .expanded { phase = .collapsed }
+        case .alertRaised: if phase == .collapsed { phase = .alert }
+        case .alertFolded, .alertClosed: break
         }
         return phase
     }

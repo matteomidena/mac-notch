@@ -119,7 +119,8 @@ final class NotchController: NSObject {
     private func currentFootprint() -> CGSize {
         NotchFootprint.size(phase: stateMachine.phase, showAmbient: model.showAmbient,
                             notchSize: notchSize(), ambientSize: ambientSize(),
-                            expandedSize: expandedSize)
+                            expandedSize: expandedSize,
+                            alertSize: notchSize())  // placeholder: the strip size is wired with the runaway strip
     }
 
     /// The mouse-interactive region. When open, the whole expanded panel (so its
