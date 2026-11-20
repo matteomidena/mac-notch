@@ -6,6 +6,7 @@ import SwiftUI
     private let enabledStore: PluginStorage?
     private var disabledIds: Set<String>
     public private(set) var widgets: [PluginWidget] = []
+    public private(set) var tabs: [PluginTab] = []
 
     public init(host: PluginHost, plugins: [NotchPlugin], enabledStore: PluginStorage? = nil) {
         self.host = host
@@ -34,7 +35,8 @@ import SwiftUI
     }
 
     public func reload() {
-        widgets = activePlugins.flatMap { $0.widgets() }
+        tabs = activePlugins.compactMap { $0 as? NotchTabProvider }.flatMap { $0.tabs() }
+        widgets = activePlugins.filter { !($0 is NotchTabProvider) }.flatMap { $0.widgets() }
             .enumerated()
             .sorted { (rank($0.element.size), $0.offset) < (rank($1.element.size), $1.offset) }
             .map(\.element)

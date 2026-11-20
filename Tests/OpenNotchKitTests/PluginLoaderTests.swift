@@ -54,3 +54,25 @@ func makeTempDir() throws -> URL {
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }
+
+private func stubCreate(_ h: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer {
+    makePlugin(h) { StubPlugin(host: $0) }
+}
+
+// A 1.0.0 bundle still passes the gate under host 1.1.0 and its widgets surface.
+@MainActor @Test func oneZeroPluginLoadsUnderOneOneHost() throws {
+    guard let swiftc = PluginFixtureBuilder.swiftcPath else { return }
+    let tmp = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let dir = try PluginFixtureBuilder.build(id: "old", apiVersion: "1.0.0", into: tmp, swiftc: swiftc)
+    var loader = PluginLoader()
+    loader.openExecutable = { _ in UnsafeMutableRawPointer(bitPattern: 0x1) }
+    loader.lookupEntry = { _ in
+        unsafeBitCast(stubCreate as PluginCreateFn, to: UnsafeMutableRawPointer.self)
+    }
+    let host = FakeHost()
+    let plugin = try loader.load(pluginDirectory: dir, host: host, hostAPIVersion: "1.1.0")
+    let rt = PluginRuntime(host: host, plugins: [])
+    rt.add([plugin])
+    #expect(rt.widgets.count == 1)
+}

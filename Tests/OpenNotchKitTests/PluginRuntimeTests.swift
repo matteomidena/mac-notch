@@ -80,3 +80,27 @@ import SwiftUI
     let rt = PluginRuntime(host: host, plugins: [AppLauncherPlugin(host: host, store: store)])
     #expect(rt.quickActions.map(\.id) == ["com.a", "com.b"])
 }
+
+@MainActor struct TabStubPlugin: NotchPlugin, NotchTabProvider {
+    static let manifest = PluginManifest(id: "test.tabs", name: "Tabs", version: "1", author: "t")
+    init(host: PluginHost) {}
+    func widgets() -> [PluginWidget] { [PluginWidget(id: "tw", size: .small, content: AnyView(EmptyView()))] }
+    func tabs() -> [PluginTab] { [PluginTab(id: "t", title: "T", systemImage: "t", content: AnyView(EmptyView()))] }
+}
+
+@MainActor @Test func providerTabsAndWidgetSplit() {
+    let host = FakeHost()
+    let rt = PluginRuntime(host: host, plugins: [TabStubPlugin(host: host), StubPlugin(host: host)])
+    #expect(rt.tabs.map(\.id) == ["t"])
+    #expect(rt.widgets.map(\.id) == ["w0"])
+    rt.setEnabled("test.tabs", false)
+    #expect(rt.tabs.isEmpty)
+}
+
+@MainActor @Test func hostDefaultsAreInertServices() {
+    let host = FakeHost()
+    #expect(host.agents.limits.isEmpty && host.agents.liveSessions.isEmpty)
+    #expect(host.agents.alert == nil && !host.agents.canControl)
+    #expect(host.spectrum.levels == [0, 0, 0] && !host.spectrum.isAvailable)
+    host.np.toggleShuffle()  // default no-op must exist
+}

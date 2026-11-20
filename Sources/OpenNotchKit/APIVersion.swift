@@ -1,6 +1,6 @@
 /// The plugin API version this host implements. Bump the MAJOR on any
 /// source-breaking change to the plugin-facing API; loader refuses mismatched majors.
-public let OPENNOTCH_API_VERSION = "1.0.0"
+public let OPENNOTCH_API_VERSION = "1.1.0"
 
 public enum APICompatibility: Equatable {
     case compatible
