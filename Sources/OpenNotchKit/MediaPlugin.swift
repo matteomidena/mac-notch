@@ -21,9 +21,9 @@ import SwiftUI
 struct CompactWing: View {
     let host: PluginHost
     var body: some View {
-        HStack(spacing: 6) {
-            ArtworkView(data: host.nowPlaying.current?.artworkData, size: 18, cornerRadius: 4)
-            EqualizerBars(isPlaying: host.nowPlaying.current?.isPlaying ?? false, barHeight: 13).foregroundStyle(musicColor)
+        HStack(spacing: 4) {
+            ArtworkView(data: host.nowPlaying.current?.artworkData, size: 16, cornerRadius: 4)
+            EqualizerBars(isPlaying: host.nowPlaying.current?.isPlaying ?? false, barHeight: 13).foregroundStyle(Hex.ink)
         }
         .offset(y: -3)
     }

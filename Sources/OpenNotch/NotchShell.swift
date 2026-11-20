@@ -8,6 +8,7 @@ import OpenNotchKit
 struct NotchPanelShape: Shape {
     var topRadius: CGFloat = 10      // inverse (concave) flare
     var bottomRadius: CGFloat = 22   // convex round
+    var animatableData: CGFloat { get { bottomRadius } set { bottomRadius = newValue } }
     func path(in rect: CGRect) -> Path {
         let w = rect.width, h = rect.height, tr = topRadius, br = bottomRadius
         var p = Path()
@@ -144,7 +145,7 @@ struct NotchShell: View {
     let model: NotchViewModel
     var body: some View {
         ZStack(alignment: .top) {
-            NotchPanelShape(topRadius: 10, bottomRadius: 20)
+            NotchPanelShape(topRadius: 10, bottomRadius: model.isOpen ? 20 : 12)
                 .fill(.black)
                 .frame(width: model.footprint.width, height: model.footprint.height)
             content
@@ -210,7 +211,7 @@ struct NotchShell: View {
             Spacer(minLength: model.notchGap)
             model.compactTrailing
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
     }

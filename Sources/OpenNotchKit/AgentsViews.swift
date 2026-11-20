@@ -16,9 +16,9 @@ struct AgentsFigure: View {
             let pct = tight.window.percent(at: now)
             VStack(alignment: .trailing, spacing: 3) {
                 Text("\(Int(pct.rounded()))%").font(Hex.mono(12)).foregroundStyle(Hex.ink)
-                Capsule().fill(Hex.line(0.10)).frame(width: 28, height: 1.5)
+                Capsule().fill(Hex.line(0.10)).frame(width: 24, height: 1.5)
                     .overlay(alignment: .leading) {
-                        Capsule().fill(Hex.ink).frame(width: 28 * min(max(pct, 0), 100) / 100, height: 1.5)
+                        Capsule().fill(Hex.ink).frame(width: 24 * min(max(pct, 0), 100) / 100, height: 1.5)
                     }
             }
         }

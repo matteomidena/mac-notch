@@ -124,7 +124,7 @@ struct MusicTabView: View {
                             .foregroundStyle(.white.opacity(0.55)).lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    EqualizerBars(isPlaying: host.nowPlaying.current?.isPlaying ?? false, barHeight: 22).foregroundStyle(musicColor)
+                    EqualizerBars(isPlaying: host.nowPlaying.current?.isPlaying ?? false, barHeight: 22).foregroundStyle(Hex.ink)
                 }
                 if let info, info.duration != nil { ProgressBar(info: info, seek: vm.seek) }
                 HStack(spacing: 24) {
@@ -152,4 +152,3 @@ struct MusicTabView: View {
     }
 }
 
-let musicColor = Color(red: 1, green: 0xB0 / 255, blue: 0x8A / 255)

@@ -127,7 +127,7 @@ final class NotchController: NSObject {
     }
 
     private func ambientSize() -> CGSize {
-        CGSize(width: model.notchGap + 80, height: model.topInset)
+        CGSize(width: model.notchGap + 94, height: model.topInset)
     }
 
     /// Ambient bar shows when media is present or any plan limit exists.
