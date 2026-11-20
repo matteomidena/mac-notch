@@ -46,3 +46,23 @@ private func fixtureLines() throws -> [String] {
     #expect(b?.session == "agent-1" && b?.parent == u)
     #expect(ClaudeLogParser.sessionIds(path: "/x/notes.txt") == nil)
 }
+
+@Test func splitterReturnsManyLinesInOrderAndKeepsFragment() {
+    var s = LineSplitter()
+    #expect(s.feed(Data("one\ntwo\nthree\nfo".utf8)) == ["one", "two", "three"])
+    #expect(s.feed(Data("ur\n".utf8)) == ["four"])
+}
+
+@Test func splitterFeedEndingOnNewlineDoesNotReEmit() {
+    var s = LineSplitter()
+    #expect(s.feed(Data("a\nb\n".utf8)) == ["a", "b"])
+    #expect(s.feed(Data("c\n".utf8)) == ["c"])
+    #expect(s.feed(Data()) == [])
+}
+
+@Test func splitterKeepsMultibyteCharSplitAcrossFeeds() {
+    var s = LineSplitter()
+    let bytes = Array("é\n".utf8)  // 0xC3 0xA9 0x0A
+    #expect(s.feed(Data(bytes[0..<1])) == [])
+    #expect(s.feed(Data(bytes[1...])) == ["é"])
+}

@@ -9,10 +9,12 @@ public struct LineSplitter {
     public mutating func feed(_ data: Data) -> [String] {
         buffer.append(data)
         var lines: [String] = []
-        while let nl = buffer.firstIndex(of: 0x0A) {
-            lines.append(String(decoding: buffer[buffer.startIndex..<nl], as: UTF8.self))
-            buffer = Data(buffer[buffer.index(after: nl)...])
+        var start = buffer.startIndex
+        while let nl = buffer[start...].firstIndex(of: 0x0A) {
+            lines.append(String(decoding: buffer[start..<nl], as: UTF8.self))
+            start = buffer.index(after: nl)
         }
+        if start != buffer.startIndex { buffer = Data(buffer[start...]) }  // trim once
         return lines
     }
 }
