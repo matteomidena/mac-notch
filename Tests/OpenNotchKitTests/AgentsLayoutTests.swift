@@ -1,5 +1,5 @@
 import Testing
-import CoreGraphics
+import Foundation
 @testable import OpenNotchKit
 
 @Test func agentsPanelHeightHasMinimumOf300() {

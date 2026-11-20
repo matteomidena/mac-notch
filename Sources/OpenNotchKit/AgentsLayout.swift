@@ -1,5 +1,4 @@
 import Foundation
-import CoreGraphics
 
 /// Height of the open notch on the Agents tab: it grows with the rows, between today's 300 and a cap.
 public enum AgentsLayout {
