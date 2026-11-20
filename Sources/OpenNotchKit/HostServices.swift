@@ -23,11 +23,6 @@ public struct RunawayAlert: Equatable, Sendable {
     func refreshLimits()
 }
 
-@MainActor public protocol SpectrumService: AnyObject, Observable {
-    var levels: [Double] { get }
-    var isAvailable: Bool { get }
-}
-
 public struct PluginTab: Identifiable {
     public let id, title, systemImage: String
     public let content: AnyView
@@ -51,10 +46,4 @@ public struct PluginTab: Identifiable {
     public func redirect(sessionId: String, text: String) {}
     public func dismiss(sessionId: String) {}
     public func refreshLimits() {}
-}
-
-@MainActor @Observable public final class NoSpectrum: SpectrumService {
-    public static let shared = NoSpectrum()
-    public var levels: [Double] { [0, 0, 0] }
-    public var isAvailable: Bool { false }
 }

@@ -102,6 +102,5 @@ import SwiftUI
     let host = FakeHost()
     #expect(host.agents.limits.isEmpty && host.agents.liveSessions.isEmpty)
     #expect(host.agents.alert == nil && !host.agents.canControl)
-    #expect(host.spectrum.levels == [0, 0, 0] && !host.spectrum.isAvailable)
     host.np.toggleShuffle()  // default no-op must exist
 }

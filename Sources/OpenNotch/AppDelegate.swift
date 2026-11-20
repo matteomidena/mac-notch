@@ -25,11 +25,9 @@ final class AppHost: PluginHost {
     let bridge: MediaRemoteBridge
     var nowPlaying: NowPlayingService { bridge }
     let agents: AgentUsageService
-    let spectrum: SpectrumService
 
-    init(bridge: MediaRemoteBridge, agents: AgentUsageService, spectrum: SpectrumService) {
+    init(bridge: MediaRemoteBridge, agents: AgentUsageService) {
         self.bridge = bridge
-        self.spectrum = spectrum
         self.agents = agents
     }
 
@@ -99,9 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let agents = AgentUsage()
         agents.start()
-        let audioTap = AudioTap(nowPlaying: bridge)
-        audioTap.start()
-        let host = AppHost(bridge: bridge, agents: agents, spectrum: audioTap)
+        let host = AppHost(bridge: bridge, agents: agents)
         if launcherStore.bundleIds.isEmpty {
             launcherStore.add("com.apple.Safari")
             launcherStore.add("com.apple.iCal")     // Calendar

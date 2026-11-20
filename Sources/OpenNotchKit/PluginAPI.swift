@@ -89,12 +89,10 @@ public extension NowPlayingService {
     func storage(for pluginId: String) -> PluginStorage
     // Added in 1.1 — appended last so 1.0 witness-table offsets are unchanged.
     var agents: AgentUsageService { get }
-    var spectrum: SpectrumService { get }
 }
 
 public extension PluginHost {
     var agents: AgentUsageService { NoAgents.shared }
-    var spectrum: SpectrumService { NoSpectrum.shared }
     func storage(for pluginId: String) -> PluginStorage {
         UserDefaultsPluginStorage(pluginId: pluginId)
     }

@@ -31,7 +31,6 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
-    <key>NSAudioCaptureUsageDescription</key><string>OpenNotch shows a live spectrum of the music you play.</string>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>

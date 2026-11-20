@@ -32,49 +32,32 @@ public struct ArtworkView: View {
     }
 }
 
-/// Fallback when there's no spectrum: 3 bars following a slow blend of sines, each eased
-/// toward its target every frame (the mockup's low-pass). Static under Reduce Motion.
+/// Decorative equalizer: 3 capsules on out-of-phase sines (the July look). Still when paused
+/// or under Reduce Motion.
 public struct EqualizerBars: View {
     private let isPlaying: Bool
     private let barHeight: CGFloat
-    @State private var eased = Eased()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     public init(isPlaying: Bool, barHeight: CGFloat = 18) {
         self.isPlaying = isPlaying
         self.barHeight = barHeight
     }
-    /// Reference type so frames can ease without mutating @State during `body`.
-    final class Eased { var v = [0.4, 0.6, 0.5] }
+    static func level(i: Int, t: Double, isPlaying: Bool, reduceMotion: Bool) -> Double {
+        guard isPlaying else { return 0.22 }
+        if reduceMotion { return [0.45, 0.75, 0.55][i] }
+        return 0.25 + 0.75 * (sin(t * 6.0 + Double(i) * 1.7) * 0.5 + 0.5)
+    }
     public var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20.0,
                                 paused: !isPlaying || reduceMotion)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            SpectrumBars(levels: levels(t: t), isPlaying: true, height: barHeight)
-        }
-    }
-    private func levels(t: Double) -> [Double] {
-        if reduceMotion { return [0.45, 0.75, 0.55] }
-        guard isPlaying else { return [0, 0, 0] }
-        for i in 0..<3 {
-            let d = Double(i)
-            let target = 0.28 + 0.72 * (0.5 + 0.25 * sin(t * (2.1 + d * 0.7) + d * 1.9)
-                                            + 0.25 * sin(t * (3.3 - d * 0.5) + d))
-            eased.v[i] += (target - eased.v[i]) * 0.08
-        }
-        return eased.v
-    }
-}
-
-/// The one place that picks real spectrum vs. the fallback bars.
-struct VisualizerBars: View {
-    let host: PluginHost
-    let height: CGFloat
-    var body: some View {
-        let playing = host.nowPlaying.current?.isPlaying ?? false
-        if host.spectrum.isAvailable {
-            SpectrumBars(levels: host.spectrum.levels, isPlaying: playing, height: height)
-        } else {
-            EqualizerBars(isPlaying: playing, barHeight: height)
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(0..<3, id: \.self) { i in
+                    Capsule().frame(width: 2.5, height: barHeight * Self.level(
+                        i: i, t: t, isPlaying: isPlaying, reduceMotion: reduceMotion))
+                }
+            }
+            .frame(height: barHeight)
         }
     }
 }
@@ -141,7 +124,7 @@ struct MusicTabView: View {
                             .foregroundStyle(.white.opacity(0.55)).lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    VisualizerBars(host: host, height: 22).foregroundStyle(musicColor)
+                    EqualizerBars(isPlaying: host.nowPlaying.current?.isPlaying ?? false, barHeight: 22).foregroundStyle(musicColor)
                 }
                 if let info, info.duration != nil { ProgressBar(info: info, seek: vm.seek) }
                 HStack(spacing: 24) {

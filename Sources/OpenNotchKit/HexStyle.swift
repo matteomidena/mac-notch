@@ -14,22 +14,3 @@ public enum Hex {
     }
     public static func mono(_ size: CGFloat) -> Font { .system(size: size, design: .monospaced) }
 }
-
-/// Three capsules at the given levels (0…1). Paused, they rest at the 3 pt minimum.
-public struct SpectrumBars: View {
-    private let levels: [Double]
-    private let isPlaying: Bool
-    private let height: CGFloat
-    public init(levels: [Double], isPlaying: Bool, height: CGFloat) {
-        self.levels = levels; self.isPlaying = isPlaying; self.height = height
-    }
-    public var body: some View {
-        HStack(alignment: .center, spacing: height > 18 ? 3 : 2.5) {
-            ForEach(0..<3, id: \.self) { i in
-                let v = isPlaying && i < levels.count ? min(max(levels[i], 0), 1) : 0
-                Capsule().frame(width: 3, height: max(3, v * height))
-            }
-        }
-        .frame(height: height)
-    }
-}

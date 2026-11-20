@@ -23,7 +23,7 @@ struct CompactWing: View {
     var body: some View {
         HStack(spacing: 6) {
             ArtworkView(data: host.nowPlaying.current?.artworkData, size: 18, cornerRadius: 4)
-            VisualizerBars(host: host, height: 13).foregroundStyle(musicColor)
+            EqualizerBars(isPlaying: host.nowPlaying.current?.isPlaying ?? false, barHeight: 13).foregroundStyle(musicColor)
         }
         .offset(y: -3)
     }
