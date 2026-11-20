@@ -38,9 +38,9 @@ All returned status 0.
 | 3 | source changed, new CDHash | 4 s | 0.16–0.22, max 0.35 | ~0.2% |
 
 - The IOProc fires with a tap-only private aggregate device. No output sub-device is needed.
-- **The prompt.** The wait in run 1 is the call blocking until the owner answered the macOS prompt. The wait in run 3 points to a second prompt for the changed binary. *To confirm with the owner.*
-- **Does permission survive a rebuild?** A rebuild that leaves the binary unchanged keeps the permission (run 2). A changed binary appears to ask again (run 3): ad-hoc permission seems tied to the binary's code hash. **Consequence:** each new build of OpenNotch from `Scripts/make-app.sh` may ask once more. That is acceptable for a personal build. Settings should show the audio state and offer "Grant" (Task 23).
-- **System Settings entry:** *To confirm with the owner* which heading under Privacy & Security → Screen & System Audio Recording lists the app.
+- **The prompt.** The wait in run 1 is the call blocking until the owner answered the macOS prompt. The wait in run 3 is a second prompt for the changed binary. The owner confirmed prompts in runs 1 and 3, and none in run 2.
+- **Does permission survive a rebuild?** A rebuild that leaves the binary unchanged keeps the permission (run 2). A changed binary asks again (run 3): ad-hoc permission is tied to the binary's code hash. **Consequence:** each new build of OpenNotch from `Scripts/make-app.sh` may ask once more. That is acceptable for a personal build. Settings should show the audio state and offer "Grant" (Task 23).
+- **System Settings entry:** not confirmed. The owner's answer did not name the heading, and the permission database is not readable without Full Disk Access. The Task 24 checklist checks where OpenNotch appears under Privacy & Security → Screen & System Audio Recording.
 - CPU stayed well under the 3% budget.
 
 ## What this changes
