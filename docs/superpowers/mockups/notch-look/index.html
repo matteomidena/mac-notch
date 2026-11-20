@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notch look</title>
+<style>
+  /* Agents side uses Hex's tokens (anoma.ly/hex): #070707 ground, #F2F2EF ink,
+     hairlines at 7-14% ink, 12.8 / 8.8 / 5.6 radii, Inter 540 tight titles, mono figures.
+     Music side and the tab pill follow NotchNook. */
+  :root {
+    --page:#0e0f14; --text:#e8e8ec; --muted:#9a9aa6; --line:#262833;
+    --ink:#f2f2ef; --ink-2:#b9bbc0; --ink-3:#9b9da3;
+    --hair:rgba(242,242,239,.07); --hair-2:rgba(242,242,239,.10); --hair-3:rgba(242,242,239,.14);
+    --fill:rgba(242,242,239,.024); --chip:rgba(242,242,239,.10);
+    --sans:"Inter Variable",Inter,-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+    --music:#ffb08a;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); color:var(--text); font:14px/1.5 var(--sans); }
+  .wrap { max-width:900px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:0 0 2px; }
+  .cap { color:var(--muted); margin:0 0 12px; max-width:70ch; }
+  .flow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:10px 0 0; color:var(--muted); }
+  .flow b { color:var(--text); font-weight:600; background:#1a1b23; border:1px solid var(--line); border-radius:6px; padding:2px 8px; }
+  section { margin:32px 0 0; }
+
+  /* ---------- desktop + notch ---------- */
+  .screen { position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--line);
+            background:radial-gradient(120% 140% at 30% 0%, #3a3550 0%, #1d2030 45%, #12131a 100%); }
+  .menubar { height:32px; display:flex; justify-content:space-between; align-items:center; padding:0 14px;
+             font-size:13px; color:rgba(255,255,255,.78); }
+  .menubar span + span { margin-left:16px; }
+  .top { position:absolute; top:0; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .notch { position:relative; background:#070707; border-radius:0 0 18px 18px; }
+  .notch::before, .notch::after { content:""; position:absolute; top:0; width:10px; height:10px; }
+  .notch::before { left:-10px;  background:radial-gradient(circle at 0 100%, transparent 9.5px, #070707 10px); }
+  .notch::after  { right:-10px; background:radial-gradient(circle at 100% 100%, transparent 9.5px, #070707 10px); }
+  .cam { position:absolute; top:12px; left:50%; width:7px; height:7px; margin-left:-3.5px; border-radius:50%;
+         background:#0b0b10; box-shadow:inset 0 0 0 1px #15151c; }
+  .wings { height:32px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; }
+  .wing { display:flex; align-items:center; gap:6px; }
+
+  /* ---------- music: NotchNook-like ---------- */
+  .art { flex:none; border-radius:4px; background:linear-gradient(135deg,#ff5f6d 0%,#ffc371 55%,#6a3093 100%); }
+  .viz { display:flex; align-items:center; gap:2.5px; color:var(--music); }
+  .viz i { display:block; width:3px; border-radius:3px; background:currentColor; height:30%; will-change:height; }
+  .t { font-weight:600; font-size:14px; color:#fff; line-height:1.3; }
+  .a { color:rgba(255,255,255,.55); font-size:13px; }
+  .prog { display:flex; align-items:center; gap:8px; font:11px var(--mono); color:rgba(255,255,255,.5); }
+  .prog .track { flex:1; height:4px; border-radius:2px; background:rgba(255,255,255,.14); position:relative; }
+  .prog .track b { position:absolute; inset:0 58% 0 0; border-radius:2px; background:rgba(255,255,255,.85); }
+  .ctl { display:flex; justify-content:center; align-items:center; gap:24px; color:#fff; }
+  .ctl svg { width:18px; height:18px; fill:currentColor; cursor:pointer; }
+  .ctl svg.sm { width:15px; height:15px; opacity:.55; }
+  .ctl svg.lg { width:22px; height:22px; }
+
+  /* ---------- tab pill under the panel: NotchNook-like ---------- */
+  .dock { display:flex; align-items:center; gap:2px; padding:3px; border-radius:999px;
+          background:rgba(12,12,14,.82); backdrop-filter:blur(14px); box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 8px 24px rgba(0,0,0,.4); }
+  .dock a { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px; border-radius:999px; cursor:pointer;
+            color:rgba(255,255,255,.55); font-size:12px; font-weight:540; transition:background .12s ease-out, color .12s ease-out; }
+  .dock a:hover { color:#fff; }
+  .dock a.on { background:rgba(255,255,255,.12); color:#fff; padding:0 11px; }
+  .dock a span { display:none; } .dock a.on span { display:inline; }
+  .dock svg { width:13px; height:13px; fill:currentColor; }
+  .dock .dot { width:5px; height:5px; border-radius:50%; background:var(--ink); margin-left:-2px; animation:blink 1.4s steps(1) infinite; }
+
+  /* ---------- agents: Hex style ---------- */
+  .ag { font-family:var(--sans); color:var(--ink); }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .ttl { font-weight:540; letter-spacing:-.03em; }
+  .mut { color:var(--ink-3); } .mut2 { color:var(--ink-2); }
+  .stack { background:var(--fill); border:1px solid var(--hair-2); border-radius:12.8px; overflow:hidden; }
+  .stack .r { display:flex; align-items:center; gap:10px; padding:7px 12px; border-top:1px solid var(--hair); min-height:32px; }
+  .stack .r:first-child { border-top:0; }
+  .stack .hd { padding:9px 12px; }
+  .grow { flex:1; }
+  .lbl { font-size:12.5px; color:var(--ink-3); }
+  .proj { font-size:13px; font-weight:500; letter-spacing:-.01em; }
+  .tag { font:10px/1 var(--mono); color:var(--ink-2); border:1px solid var(--hair-3); border-radius:5.6px; padding:3px 5px; }
+  .num { font:12px/1 var(--mono); }
+  .inv { background:var(--ink); color:#070707; border-radius:5.6px; padding:3px 6px; }
+  .meter { display:inline-flex; gap:2px; }
+  .meter i { display:block; width:5px; height:8px; border-radius:1px; background:var(--chip); }
+  .meter i.f { background:var(--ink); }
+  .mini { display:inline-flex; flex-direction:column; gap:3px; }
+  .mini i { display:block; height:1.5px; border-radius:1px; background:linear-gradient(90deg, var(--ink) var(--v), var(--chip) var(--v)); }
+  .spark { display:inline-flex; align-items:flex-end; gap:1.5px; height:14px; }
+  .spark i { display:block; width:2px; border-radius:1px; background:rgba(242,242,239,.35); }
+  .spark i.h { background:var(--ink); }
+  .live { display:inline-flex; align-items:center; gap:6px; font:11px var(--mono); color:var(--ink-3); }
+  .live::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--ink); animation:blink 1.4s steps(1) infinite; }
+  .btn { cursor:pointer; font:11px/1 var(--mono); color:var(--ink); background:transparent; border:1px solid var(--hair-3);
+         border-radius:8.8px; padding:6px 9px; transition:background .12s ease-out; }
+  .btn:hover { background:var(--chip); }
+  /* Hex's keycap, small: the one "cyber" object, used for the two actions */
+  .key { cursor:pointer; position:relative; display:inline-flex; align-items:flex-end; min-width:76px; height:34px; padding:0 10px 6px;
+         font:500 12px/1 var(--sans); color:var(--ink); border:0; border-radius:9px;
+         background:linear-gradient(180deg,#1b1b1f 0%,#0d0d10 100%);
+         box-shadow:inset 0 1px 0 rgba(255,255,255,.28), inset 1px 0 0 rgba(255,255,255,.10), inset -1px 0 0 rgba(255,255,255,.08),
+                    0 0 0 1px #040406, 0 6px 14px rgba(0,0,0,.75);
+         transition:transform .1s ease-out, box-shadow .1s ease-out; }
+  .key small { position:absolute; top:6px; right:9px; font:10px var(--mono); color:var(--ink-3); }
+  .key:active { transform:translateY(1px); box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 0 0 1px #040406, 0 2px 6px rgba(0,0,0,.75); }
+  .key.primary { background:linear-gradient(180deg,#f7f7f4 0%,#dcdcd8 100%); color:#070707;
+                 box-shadow:inset 0 1px 0 #fff, 0 0 0 1px #040406, 0 6px 14px rgba(0,0,0,.75); }
+  .key.primary small { color:#55565b; }
+  .field { display:flex; align-items:center; gap:8px; margin-top:10px; background:var(--fill); border:1px solid var(--hair-3);
+           border-radius:8.8px; padding:7px 10px; font-size:13px; }
+  .field[hidden] { display:none; }
+  .caret { width:1.5px; height:15px; background:var(--ink); animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:.15; } }
+  .pulse { animation:blink 1.4s steps(1) infinite; }
+  .pane { padding:6px 16px 16px; }
+  @media (prefers-reduced-motion: reduce) { .live::before, .caret, .pulse, .dock .dot { animation:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>The notch, with tabs</h1>
+  <p class="cap">Music and the tab pill follow NotchNook. The agents side follows Hex: black and white, hairline panels, Inter for words, a monospace font for figures, and its glossy keycap for Stop and Redirect. Inter isn't installed on this Mac, so this page falls back to SF Pro; the app would bundle Inter. Numbers are illustrative, except Codex's 6% weekly use, which comes from your Codex logs.</p>
+  <div class="flow"><b>1 Closed: music + plan meter</b>→<b>2 Runaway: warning drops down</b>→<b>3 Hover: Agents or Music tab</b></div>
+
+  <!-- 1. closed -->
+  <section id="closed">
+    <h2>1 · Closed notch</h2>
+    <p class="cap">270 wide, narrower than today (about 285). Left: artwork and three smooth bars that follow the music. Right: the tightest plan limit across Claude and Codex (here Claude's 5-hour window, 62% used).</p>
+    <div class="screen" style="height:96px">
+      <div class="menubar"><div><span></span><span>Finder</span><span>File</span><span>Edit</span><span>View</span></div><div><span>Fri 20 Nov</span><span>10:42</span></div></div>
+      <div class="top"><div class="notch ag" style="width:270px;height:32px">
+        <div class="cam"></div>
+        <div class="wings">
+          <div class="wing"><div class="art" style="width:18px;height:18px"></div><div class="viz" data-h="13"></div></div>
+          <div class="wing"><span class="mini"><span class="num">62%</span><i style="--v:62%"></i></span></div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- 2. runaway -->
+  <section id="runaway">
+    <h2>2 · A session is burning too much</h2>
+    <p class="cap">The notch drops a strip on its own, no hover needed: which agent, which project, the first prompt, and the burn rate against your normal. 360 wide; it grows down, not sideways. Try Redirect.</p>
+    <div class="screen" style="height:210px">
+      <div class="menubar"><div><span></span><span>Finder</span><span>File</span><span>Edit</span><span>View</span></div><div><span>Fri 20 Nov</span><span>10:42</span></div></div>
+      <div class="top"><div class="notch ag" style="width:360px">
+        <div class="cam"></div>
+        <div class="wings" style="padding:0 14px">
+          <div class="wing"><div class="art" style="width:18px;height:18px"></div><div class="viz" data-h="13"></div></div>
+          <div class="wing"><span class="num inv pulse">4.3×</span></div>
+        </div>
+        <div style="padding:8px 16px 14px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="tag">CC</span><span class="ttl" style="font-size:15px">mac-notch · 4.3× your normal</span>
+          </div>
+          <div class="mut" style="font-size:13px;margin:3px 0 2px">“Add the spectrum view”</div>
+          <div class="mut mono" style="font-size:12px;margin:0 0 10px">41k tok/min · 1.2M total · 18 min</div>
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button class="key" id="redirBtn">Redirect<small>↵</small></button>
+            <button class="key primary" id="stopBtn">Stop<small>esc</small></button>
+          </div>
+          <div class="field" id="redirIn" hidden><span>Skip the tests for now, just build the view</span><span class="caret"></span><span class="grow"></span><span class="num mut">send ↵</span></div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- 3a. agents tab -->
+  <section id="tab-agents">
+    <h2>3a · Hover: Agents tab</h2>
+    <p class="cap">440 wide (today's panel is 416). The tab pill floats under the panel, like NotchNook: the open tab shows its name, the others only an icon. The panel opens on Agents while a session runs; the dot on the tab means one is live.</p>
+    <div class="screen" style="height:420px">
+      <div class="menubar"><div><span></span><span>Finder</span><span>File</span><span>Edit</span><span>View</span></div><div><span>Fri 20 Nov</span><span>10:42</span></div></div>
+      <div class="top">
+        <div class="notch ag" style="width:440px"><div class="cam"></div><div style="height:32px"></div>
+          <div class="pane"><div data-agents="4" data-spark></div></div></div>
+        <div class="dock" data-dock="agents"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3b. music tab -->
+  <section id="tab-music">
+    <h2>3b · Hover: Music tab</h2>
+    <p class="cap">Same width, shorter. Laid out like NotchNook's player.</p>
+    <div class="screen" style="height:250px">
+      <div class="menubar"><div><span></span><span>Finder</span><span>File</span><span>Edit</span><span>View</span></div><div><span>Fri 20 Nov</span><span>10:42</span></div></div>
+      <div class="top">
+        <div class="notch" style="width:440px"><div class="cam"></div><div style="height:32px"></div>
+          <div class="pane" style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:12px;align-items:center">
+              <div class="art" style="width:52px;height:52px;border-radius:10px"></div>
+              <div style="flex:1;min-width:0"><div class="t">Midnight City</div><div class="a">M83</div></div>
+              <div class="viz" data-h="22" style="gap:3px"></div>
+            </div>
+            <div class="prog"><span>1:42</span><div class="track"><b></b></div><span>-2:21</span></div>
+            <div class="ctl">
+              <svg class="sm" viewBox="0 0 24 24"><path d="M17 3l4 4-4 4V8h-2.6L8 17H3v-2h4l6.4-9H17zM3 7h5l1.7 2.4-1.2 1.7L7 9H3zm11.3 7.9L15.7 17H17v-3l4 4-4 4v-3h-2.4l-1.5-2.1z"/></svg>
+              <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+              <svg class="lg" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+              <svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+              <svg class="sm" viewBox="0 0 24 24"><path d="M3 4h18v12h-5l-1.5-2H19V6H5v8h4.5L8 16H3zm9 8l6 8H6z"/></svg>
+            </div>
+          </div></div>
+        <div class="dock" data-dock="music"></div>
+      </div>
+    </div>
+  </section>
+  <p class="note" style="font-size:13px;color:var(--muted);margin:8px 0 0">The app launcher from today's panel could become a third tab in the same pill.</p>
+</div>
+
+<script>
+const LIMITS = [["Claude · 5h", 62, "1h 42m"], ["Claude · week", 31, "Thu"], ["Codex · week", 6, "5d"]];
+const SESSIONS = [
+  { proj:"mac-notch",    a:"CC", rate:"41k", x:"4.3×", hot:true, spark:[2,2,3,2,3,3,4,5,6,8,9,11,12,13] },
+  { proj:"cato-hand",    a:"CC", rate:"9k",  x:"1.0×", spark:[3,4,3,4,5,3,4,3,4,5,4,3,4,4] },
+  { proj:"fleet",        a:"CX", rate:"3k",  x:"0.6×", spark:[1,2,2,1,2,3,2,2,1,2,2,1,2,2] },
+  { proj:"second-brain", a:"CC", rate:"1k",  x:"0.3×", spark:[1,1,1,1,1,1,1,1,1,1,1,1,1,1] },
+];
+document.querySelectorAll("[data-agents]").forEach(el => {
+  const n = +el.dataset.agents;
+  let h = `<div class="stack"><div class="r hd"><span class="ttl" style="font-size:14px">Agents</span><span class="grow"></span><span class="live">live</span></div>`;
+  for (const [k, v, reset] of LIMITS)
+    h += `<div class="r"><span class="lbl">${k}</span><span class="grow"></span><span class="meter" data-v="${v}"></span><span class="num" style="width:30px;text-align:right">${v}%</span><span class="num mut" style="width:46px;text-align:right">${reset}</span></div>`;
+  h += `<div class="r"><span class="lbl">Codex credits</span><span class="grow"></span><span class="num mut2">available</span></div></div><div class="stack" style="margin-top:8px">`;
+  for (const s of SESSIONS.slice(0, n)) {
+    h += `<div class="r"><span class="tag">${s.a}</span><span class="proj">${s.proj}</span><span class="grow"></span>
+      <span class="spark">${s.spark.map((v, i) => `<i class="${s.hot && i > 8 ? "h" : ""}" style="height:${v}px"></i>`).join("")}</span>
+      <span class="num mut">${s.rate}/min</span><span class="num ${s.hot ? "inv" : "mut2"}">${s.x}</span>${s.hot ? `<button class="btn">stop</button>` : ""}</div>`;
+  }
+  el.innerHTML = h + `</div>`;
+});
+document.querySelectorAll(".meter").forEach(el => {
+  const f = Math.round(+el.dataset.v / 10);
+  el.innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < f ? "f" : ""}"></i>`).join("");
+});
+const ICON = {
+  music: `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`,
+  agents: `<svg viewBox="0 0 24 24"><path d="M4 6l6 6-6 6-1.4-1.4L7.2 12 2.6 7.4zM11 17h10v2H11z"/></svg>`,
+};
+document.querySelectorAll("[data-dock]").forEach(el => {
+  const on = el.dataset.dock;
+  el.innerHTML = ["music", "agents"].map(k =>
+    `<a class="${k === on ? "on" : ""}">${ICON[k]}<span>${k === "music" ? "Music" : "Agents"}</span>${k === "agents" ? `<i class="dot"></i>` : ""}</a>`).join("");
+});
+
+/* three smooth bars: each follows a slow blend of sines, eased toward it every frame.
+   In the app the targets come from an FFT of Spotify's audio (bass / mid / treble). */
+const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const vizes = [...document.querySelectorAll(".viz")].map(el => {
+  const H = +el.dataset.h; el.style.height = H + "px"; el.innerHTML = "<i></i><i></i><i></i>";
+  return { bars: [...el.children], H, v: [.4, .6, .5] };
+});
+function frame(t) {
+  const s = t / 1000;
+  for (const z of vizes) z.bars.forEach((b, i) => {
+    const target = still ? [.45, .75, .55][i]
+      : .28 + .72 * (.5 + .25 * Math.sin(s * (2.1 + i * .7) + i * 1.9) + .25 * Math.sin(s * (3.3 - i * .5) + i));
+    z.v[i] += (target - z.v[i]) * .08;               // low-pass: smooth, no jitter
+    b.style.height = Math.max(3, z.v[i] * z.H) + "px";
+  });
+  if (!still) requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+document.getElementById("redirBtn").onclick = () => { document.getElementById("redirIn").hidden = false; };
+document.getElementById("stopBtn").onclick = e => { e.currentTarget.firstChild.textContent = "Stopped"; };
+</script>
+</body>
+</html>
