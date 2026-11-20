@@ -75,7 +75,7 @@ struct AgentsTabView: View {
                 HStack { Text("Agents").font(Hex.text(14, weight: .semibold)).foregroundStyle(Hex.ink); Spacer() }
                     .padding(.horizontal, 12).padding(.vertical, 9)
                 if let claude {
-                    ForEach(claude.windows, id: \.label) { limitRow("Claude · \($0.label)", $0, now) }
+                    ForEach(claude.windows, id: \.label) { limitRow("Claude · \($0.label)", $0, now, age: limitAgeText(fetchedAt: claude.fetchedAt, now: now)) }
                 } else {
                     row {
                         Text("Claude").font(Hex.text(12.5)).foregroundStyle(Hex.muted)
@@ -112,12 +112,13 @@ struct AgentsTabView: View {
             .overlay(alignment: .top) { Hex.line(0.07).frame(height: 1) }
     }
 
-    private func limitRow(_ title: String, _ w: LimitWindow, _ now: Date) -> some View {
+    private func limitRow(_ title: String, _ w: LimitWindow, _ now: Date, age: String? = nil) -> some View {
         let pct = w.percent(at: now)
         let filled = Int((pct / 10).rounded())
         return row {
             Text(title).font(Hex.text(12.5)).foregroundStyle(Hex.muted)
             Spacer()
+            if let age { Text(age).font(Hex.text(11)).foregroundStyle(Hex.muted) }
             HStack(spacing: 2) {
                 ForEach(0..<10, id: \.self) { i in
                     RoundedRectangle(cornerRadius: 1).fill(i < filled ? Hex.ink : Hex.line(0.10))

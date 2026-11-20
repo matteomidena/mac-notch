@@ -7,7 +7,7 @@ private let log = Logger(subsystem: "cafe.notch", category: "agents")
 
 @MainActor @Observable
 final class AgentUsage: AgentUsageService {
-    private(set) var limits: [PlanLimits] = []  // Codex only until the Claude plan-limits task lands
+    private(set) var limits: [PlanLimits] = []
     private(set) var liveSessions: [AgentSession] = []
     private(set) var normalRate: [AgentKind: Double] = Baseline.defaultNormal
     private(set) var alert: RunawayAlert?
@@ -22,6 +22,10 @@ final class AgentUsage: AgentUsageService {
     @ObservationIgnored private var sessions: [AgentSession] = []
     @ObservationIgnored private var reevalTimer: Task<Void, Never>?
     @ObservationIgnored private var baselineTimer: Task<Void, Never>?
+    @ObservationIgnored private var codexLimits: PlanLimits?
+    @ObservationIgnored private var claudeLimits: PlanLimits?  // last good snapshot; kept across failures
+    @ObservationIgnored private var fetchGate = ClaudeFetchGate()
+    @ObservationIgnored private var fetching = false
 
     init(installer: HookInstaller = HookInstaller()) { self.installer = installer }
 
@@ -42,8 +46,45 @@ final class AgentUsage: AgentUsageService {
     func stop(sessionId: String) { send(.stop, sessionId) }
     func redirect(sessionId: String, text: String) { send(.redirect(text), sessionId) }
     func dismiss(sessionId: String) { acknowledge(sessionId) }
-    /// In-memory only (no IO): drops sessions that went quiet. The Claude usage fetch is added here by the later limits task.
-    func refreshLimits() { evaluate() }
+    /// Drops quiet sessions, then (if Connected and ≥ 60 s since the last attempt) refreshes Claude usage.
+    func refreshLimits() {
+        evaluate()
+        fetchClaudeIfDue()
+    }
+
+    /// Settings "Connect": the consent gate. Nothing reads the Keychain before this.
+    func connect() {
+        UserDefaults.standard.set(true, forKey: ClaudeUsageClient.connectedKey)
+        fetchGate = ClaudeFetchGate()
+        fetchClaudeIfDue()
+    }
+
+    private func fetchClaudeIfDue() {
+        guard UserDefaults.standard.bool(forKey: ClaudeUsageClient.connectedKey), !fetching,
+              fetchGate.allow(at: Date()) else { return }
+        fetching = true
+        Task { [weak self] in
+            // Off the main actor: SecItemCopyMatching blocks while the prompt is up.
+            let outcome = await Task.detached(priority: .utility) {
+                await ClaudeUsageFlow.run(at: Date(), read: ClaudeUsageClient.readCredential,
+                                          fetch: { await ClaudeUsageClient.fetch(token: $0) })
+            }.value
+            self?.finishFetch(outcome)
+        }
+    }
+
+    private func finishFetch(_ outcome: ClaudeUsageOutcome) {
+        fetching = false
+        switch outcome {
+        case .snapshot(let l): claudeLimits = l; publishLimits(); log.info("claude usage updated")
+        case .none: log.info("claude usage: no new snapshot")
+        case .denied:
+            UserDefaults.standard.set(false, forKey: ClaudeUsageClient.connectedKey)
+            log.info("claude usage: keychain denied, disconnected")
+        }
+    }
+
+    private func publishLimits() { limits = [claudeLimits, codexLimits].compactMap { $0 } }
 
     /// Claude only. The hook drops the in-flight tool call on stop, so nothing here promises it finishes.
     private func send(_ action: DirectiveAction, _ id: String) {
@@ -60,7 +101,9 @@ final class AgentUsage: AgentUsageService {
 
     private func apply(_ snap: AgentSnapshot) {
         sessions = snap.live
-        limits = snap.codexLimits.map { [$0] } ?? []
+        codexLimits = snap.codexLimits
+        publishLimits()
+        fetchClaudeIfDue()  // AgentSnapshot can't tell Claude events apart; the 60 s gate bounds the cost
         log.info("published \(snap.live.count) live sessions")
         evaluate()
     }
