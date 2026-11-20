@@ -631,7 +631,24 @@ Behaviour, per the mockup:
 
 - [ ] **Step 1:** Implement. **Step 2:** Check with real sessions. **Step 3:** Commit `feat: watch agent logs`.
 
+### Task 20A: Own Claude sign-in (added 2026-11-20)
+
+**From:** `docs/decisions/2026-11-20-claude-usage-source.md`, Question and choice: "Add an OpenNotch sign-in with its own token. The Claude % is always live." and Constraints: "OpenNotch keeps and refreshes its own token in its own Keychain item, separate from Claude Code."
+
+**Files:** Spike note `docs/superpowers/spikes/2026-11-20-claude-sign-in.md`. Kit (pure, test-first): `Sources/OpenNotchKit/ClaudeSignIn.swift` + `Tests/OpenNotchKitTests/ClaudeSignInTests.swift`. Host: `Sources/OpenNotch/ClaudeSignInFlow.swift`.
+
+**Acceptance criteria:**
+- Spike first, with the owner at the Mac (record line: Open questions, "A spike with one live sign-in by the owner must confirm them before the client is built."): the note records the authorize and token URLs, client id, scopes, redirect form, and whether `GET /api/oauth/usage` answers 200 with the new token and which auth header it needs. NO-GO (no 200) → stop, tell the owner, and Task 20 runs as "Keep the plan" (record: Open questions, "If it fails, the app falls back to "Keep the plan".").
+- Kit: PKCE verifier/challenge (S256), the authorize URL builder, the token-response parser (access token, refresh token, expiry), and `needsRefresh(at:)`. Tests: known PKCE vector, URL has every required query item, parser rejects a body without `access_token`, refresh due 5 min before expiry.
+- Host: "Connect" opens the browser; a loopback listener on 127.0.0.1 takes the callback once and closes; the code is exchanged; tokens go to OpenNotch's own Keychain item (service `OpenNotch-claude`), never to `Claude Code-credentials` (record: Constraints, "The Claude Code Keychain item is never written, refreshed or copied").
+- Refresh: before a usage call when `needsRefresh`; a failed refresh shows "—" and "Reconnect" (record: Constraints, "When the sign-in, the refresh or the endpoint fails, the Claude rows show "—" … and a "Reconnect" action.").
+- Nothing starts before the owner clicks "Connect"; no token value is ever printed, logged or committed (record: Constraints, third line).
+
+- [ ] **Step 1:** Spike with the owner; write the note; commit `docs: spike Claude sign-in`. **Step 2–4:** Kit tests FAIL → implement → PASS; commit `feat(kit): Claude sign-in helpers`. **Step 5:** Host flow; check by hand: Connect → browser → back in the app → Claude % shows; relaunch → no prompt, still connected. Commit `feat: OpenNotch Claude sign-in`.
+
 ### Task 20: Claude usage client
+
+> **Amended 2026-11-20 by `docs/decisions/2026-11-20-claude-usage-source.md`:** the token comes from Task 20A's own sign-in, not from the `Claude Code-credentials` item. Replace the Keychain-read criterion with "read OpenNotch's own item via Task 20A", and replace "no refresh is attempted" with "refresh via Task 20A once; on failure show "—" and "Reconnect"". All other criteria stand. If Task 20A's spike is NO-GO, run this task as written.
 
 **From:** D, Constraints: "The app only reads the Claude Code token. It never refreshes, writes or copies it." and "Claude usage is fetched when a transcript changes (at most once a minute) and when the panel opens. No timer."
 
