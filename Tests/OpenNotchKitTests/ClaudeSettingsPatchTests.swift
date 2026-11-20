@@ -80,3 +80,18 @@ private let existing = #"""
         try ClaudeSettingsPatch.install(into: Data("[]".utf8), command: C)
     }
 }
+
+@Test func installRefusesUnexpectedShapes() {
+    for s in [#"{"hooks":[]}"#,
+              #"{"hooks":{"PreToolUse":{}}}"#,
+              #"{"hooks":{"PreToolUse":[{"matcher":"Bash"},"x"]}}"#] {
+        #expect(throws: ClaudeSettingsPatch.PatchError.unexpectedShape) {
+            try ClaudeSettingsPatch.install(into: Data(s.utf8), command: C)
+        }
+    }
+}
+
+@Test func installTreatsNullAsEmpty() throws {
+    let o = try obj(ClaudeSettingsPatch.install(into: Data(#"{"hooks":{"PreToolUse":null}}"#.utf8), command: C))
+    #expect(same(o, ["hooks": ["PreToolUse": [ours()]]]))
+}

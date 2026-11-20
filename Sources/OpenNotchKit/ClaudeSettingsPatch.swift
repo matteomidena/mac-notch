@@ -2,12 +2,13 @@ import Foundation
 
 /// Adds/removes OpenNotch's PreToolUse hook in Claude's settings.json, leaving everything else alone.
 public enum ClaudeSettingsPatch {
-    public enum PatchError: Error, Equatable { case notAJSONObject }
+    public enum PatchError: Error, Equatable { case notAJSONObject, unexpectedShape }
 
     public static func install(into settings: Data?, command: String) throws -> Data {
         var root = try parse(settings)
-        var hooks = root["hooks"] as? [String: Any] ?? [:]
-        var pre = hooks["PreToolUse"] as? [[String: Any]] ?? []
+        // Missing or null is empty; any other shape is the user's data, so refuse rather than overwrite it.
+        var hooks = try typed(root["hooks"], [String: Any]())
+        var pre = try typed(hooks["PreToolUse"], [[String: Any]]())
         if !pre.contains(where: { isOurs($0, command) }) {
             pre.append(["matcher": "*", "hooks": [["type": "command", "command": command]]])
         }
@@ -38,6 +39,12 @@ public enum ClaudeSettingsPatch {
         guard let root = try? parse(settings),
               let pre = (root["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]] else { return false }
         return pre.contains { isOurs($0, command) }
+    }
+
+    private static func typed<T>(_ v: Any?, _ empty: T) throws -> T {
+        if v == nil || v is NSNull { return empty }
+        guard let t = v as? T else { throw PatchError.unexpectedShape }
+        return t
     }
 
     private static func isOurs(_ entry: [String: Any], _ command: String) -> Bool {
