@@ -23,9 +23,11 @@ private extension NSImage {
 final class AppHost: PluginHost {
     let bridge: MediaRemoteBridge
     var nowPlaying: NowPlayingService { bridge }
+    let agents: AgentUsageService
 
-    init(bridge: MediaRemoteBridge) {
+    init(bridge: MediaRemoteBridge, agents: AgentUsageService) {
         self.bridge = bridge
+        self.agents = agents
     }
 
     func launchApp(bundleIdentifier: String) {
@@ -91,7 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bridge = MediaRemoteBridge(script: paths.script, framework: paths.framework)
         bridge.start()
 
-        let host = AppHost(bridge: bridge)
+        let agents = AgentUsage()
+        agents.start()
+        let host = AppHost(bridge: bridge, agents: agents)
         if launcherStore.bundleIds.isEmpty {
             launcherStore.add("com.apple.Safari")
             launcherStore.add("com.apple.iCal")     // Calendar

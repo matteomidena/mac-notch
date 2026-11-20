@@ -54,7 +54,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     public func isLive(at now: Date) -> Bool { now.timeIntervalSince(lastActivity) <= 300 }
 }
 
-@MainActor public final class AgentSessions {
+public final class AgentSessions {
     public private(set) var sessions: [String: AgentSession] = [:]
     public private(set) var latestLimits: [AgentKind: PlanLimits] = [:]
 
