@@ -61,13 +61,11 @@ public struct LimitWindow: Equatable, Sendable {
 public struct PlanLimits: Equatable, Sendable {
     public let agent: AgentKind
     public let windows: [LimitWindow]
-    public let hasCredits: Bool?
     public let fetchedAt: Date
 
-    public init(agent: AgentKind, windows: [LimitWindow], hasCredits: Bool?, fetchedAt: Date) {
+    public init(agent: AgentKind, windows: [LimitWindow], fetchedAt: Date) {
         self.agent = agent
         self.windows = windows
-        self.hasCredits = hasCredits
         self.fetchedAt = fetchedAt
     }
 }

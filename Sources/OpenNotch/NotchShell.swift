@@ -66,7 +66,9 @@ struct NotchPanelShape: Shape {
     static let panelWidth: CGFloat = 440
     static let pillHeight: CGFloat = 36
     static let pillGap: CGFloat = 8
-    static func panelHeight(forTab id: String?) -> CGFloat { id == "agents" ? 300 : 150 }
+    static func panelHeight(forTab id: String?, limitRows: Int = 0, sessionRows: Int = 0) -> CGFloat {
+        id == "agents" ? AgentsLayout.panelHeight(limitRows: limitRows, sessionRows: sessionRows) : 150
+    }
 }
 
 /// Content materializes with the morph: scale from the top + fade + blur.

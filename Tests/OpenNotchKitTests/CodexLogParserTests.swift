@@ -30,7 +30,6 @@ private func codexLines() throws -> [String] {
     #expect(p.limits == PlanLimits(
         agent: .codex,
         windows: [LimitWindow(label: "Weekly", usedPercent: 7, resetsAt: Date(timeIntervalSince1970: 1795628010))],
-        hasCredits: true,
         fetchedAt: parseISODate("2026-01-01T10:00:02.500Z")!))
 }
 

@@ -87,7 +87,7 @@ private func deltaLine(_ t: TokenCounts, id: String?, at: Date = t0) -> ParsedLo
     let s = AgentSessions()
     func limits(_ pct: Double, _ at: Double) -> PlanLimits {
         PlanLimits(agent: .codex, windows: [LimitWindow(label: "5h", usedPercent: pct, resetsAt: nil)],
-                   hasCredits: nil, fetchedAt: Date(timeIntervalSince1970: at))
+                   fetchedAt: Date(timeIntervalSince1970: at))
     }
     s.ingest(ParsedLogLine(at: t0, limits: limits(50, 200)), agent: .codex, fileKey: "f", pathIds: nil)
     s.ingest(ParsedLogLine(at: t0, limits: limits(10, 100)), agent: .codex, fileKey: "f", pathIds: nil)

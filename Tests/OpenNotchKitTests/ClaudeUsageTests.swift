@@ -14,7 +14,6 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 @Test func decodesFiveHourAndWeekly() throws {
     let limits = try #require(ClaudeUsageDecoder.decode(try usageFixture(), at: t0))
     #expect(limits.agent == .claude)
-    #expect(limits.hasCredits == nil)
     #expect(limits.fetchedAt == t0)
     #expect(limits.windows.map(\.label) == ["5h", "Weekly"])
     #expect(limits.windows.map(\.usedPercent) == [16, 9])

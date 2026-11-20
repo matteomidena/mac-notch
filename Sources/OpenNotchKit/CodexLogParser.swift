@@ -33,7 +33,6 @@ public enum CodexLogParser {
                                            resetsAt: Date(timeIntervalSince1970: reset))
                     }
                     out.limits = PlanLimits(agent: .codex, windows: windows,
-                                            hasCredits: (rl["credits"] as? [String: Any])?["has_credits"] as? Bool,
                                             fetchedAt: at ?? Date())
                 }
             } else if ptype == "user_message" {

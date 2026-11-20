@@ -24,10 +24,10 @@ import Foundation
     let cc = PlanLimits(agent: .claude,
                         windows: [LimitWindow(label: "5h", usedPercent: 62, resetsAt: nil),
                                   LimitWindow(label: "Weekly", usedPercent: 40, resetsAt: nil)],
-                        hasCredits: nil, fetchedAt: now)
+                        fetchedAt: now)
     let cx = PlanLimits(agent: .codex,
                         windows: [LimitWindow(label: "Weekly", usedPercent: 7, resetsAt: nil)],
-                        hasCredits: true, fetchedAt: now)
+                        fetchedAt: now)
     #expect(tightestLimit([cx, cc], at: now) == TightestLimit(agent: .claude, window: cc.windows[0]))
     #expect(tightestLimit([], at: now) == nil)
 }

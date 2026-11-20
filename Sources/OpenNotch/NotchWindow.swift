@@ -16,8 +16,8 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    /// Fixed window: tallest panel (Agents 300) + 8 pt gap + 36 pt pill + spring headroom.
-    private let panelSize = CGSize(width: 520, height: 300 + NotchViewModel.pillGap + NotchViewModel.pillHeight + 40)
+    /// Fixed window: tallest panel (Agents cap) + 8 pt gap + 36 pt pill + spring headroom.
+    private let panelSize = CGSize(width: 520, height: AgentsLayout.maxHeight + NotchViewModel.pillGap + NotchViewModel.pillHeight + 40)
     private static var loggedAmbient = false
     private let hoverOutGrace: TimeInterval = 0.2
     /// Dwell before opening on hover, so a cursor merely passing over the notch
@@ -137,7 +137,9 @@ final class NotchController: NSObject {
 
     private var expandedSize: CGSize {
         CGSize(width: NotchViewModel.panelWidth,
-               height: NotchViewModel.panelHeight(forTab: model.selectedTab))
+               height: NotchViewModel.panelHeight(forTab: model.selectedTab,
+                                                  limitRows: agents.limits.reduce(0) { $0 + $1.windows.count },
+                                                  sessionRows: agents.liveSessions.count))
     }
 
     private func currentFootprint() -> CGSize {
@@ -198,6 +200,7 @@ final class NotchController: NSObject {
         withObservationTracking {
             _ = nowPlaying.current
             _ = agents.limits
+            _ = agents.liveSessions   // the Agents panel height follows both
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.playbackChanged()

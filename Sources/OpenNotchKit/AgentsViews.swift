@@ -86,21 +86,17 @@ struct AgentsTabView: View {
                 }
                 if let codex {
                     ForEach(codex.windows, id: \.label) { limitRow("Codex · \($0.label)", $0, now) }
-                    if let credits = codex.hasCredits {
-                        row {
-                            Text("Codex credits").font(Hex.text(12.5)).foregroundStyle(Hex.muted)
-                            Spacer()
-                            Text(credits ? "available" : "none").font(Hex.mono(12)).foregroundStyle(Hex.code)
-                        }
-                    }
                 }
             }
             .panel()
             if !service.liveSessions.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(service.liveSessions) { sessionRow($0, now) }
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(service.liveSessions) { sessionRow($0, now) }
+                    }
+                    .panel()
                 }
-                .panel()
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
         .frame(maxWidth: 440)

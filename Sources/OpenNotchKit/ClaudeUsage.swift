@@ -13,7 +13,7 @@ public enum ClaudeUsageDecoder {
             return LimitWindow(label: label, usedPercent: used, resetsAt: reset)
         }
         guard !windows.isEmpty else { return nil }
-        return PlanLimits(agent: .claude, windows: windows, hasCredits: nil, fetchedAt: now)
+        return PlanLimits(agent: .claude, windows: windows, fetchedAt: now)
     }
 }
 
