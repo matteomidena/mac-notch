@@ -92,7 +92,10 @@ final class AgentUsage: AgentUsageService {
     private func finishFetch(_ outcome: ClaudeUsageOutcome) {
         fetching = false
         switch outcome {
-        case .snapshot(let l): claudeLimits = l; publishLimits(); log.info("claude usage updated")
+        case .snapshot(let l):
+            // Disconnect may have landed while the fetch was in flight: drop the late result.
+            guard UserDefaults.standard.bool(forKey: ClaudeUsageClient.connectedKey) else { return }
+            claudeLimits = l; publishLimits(); log.info("claude usage updated")
         case .none: log.info("claude usage: no new snapshot")
         case .denied:
             UserDefaults.standard.set(false, forKey: ClaudeUsageClient.connectedKey)
