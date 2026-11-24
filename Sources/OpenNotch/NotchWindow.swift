@@ -47,6 +47,10 @@ final class NotchController: NSObject {
     private var pendingHoverOut: DispatchWorkItem?
     private var pendingHoverIn: DispatchWorkItem?
     private var coveredByFullscreen = false
+    /// After a Space switch the notch stays out of the way: hover can't open it
+    /// until this passes, and a cursor already under it must leave and come back.
+    private var settleUntil = Date.distantPast
+    private let spaceSettle: TimeInterval = 0.45
     private var fullscreenPoll: Timer?
     private var localMonitor: Any?
     private var globalMonitor: Any?
@@ -262,6 +266,7 @@ final class NotchController: NSObject {
         panel.ignoresMouseEvents = !inside
         guard inside != cursorInside else { return }
         cursorInside = inside
+        if Date() < settleUntil { return }  // settling after a Space switch: track, don't open
         if inside { cursorEntered() } else { cursorExited() }
     }
 
@@ -322,7 +327,7 @@ final class NotchController: NSObject {
         let ws = NSWorkspace.shared.notificationCenter
         // Immediate triggers: space changes (native fullscreen) and frontmost-app
         // changes both warrant instant re-evaluation.
-        ws.addObserver(self, selector: #selector(evaluateFullscreen),
+        ws.addObserver(self, selector: #selector(spaceChanged),
                        name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         ws.addObserver(self, selector: #selector(evaluateFullscreen),
                        name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -348,6 +353,22 @@ final class NotchController: NSObject {
         RunLoop.main.add(poll, forMode: .common)
         fullscreenPoll = poll
         evaluateFullscreen()
+    }
+
+    /// Space switch (swipe, full-screen app): hide, then fade back in once it has settled,
+    /// instead of popping open under a cursor that happens to be at the top.
+    @objc private func spaceChanged() {
+        pendingHoverIn?.cancel(); pendingHoverIn = nil
+        if stateMachine.phase == .expanded { transition(.hoverOut) }
+        settleUntil = Date().addingTimeInterval(spaceSettle)
+        panel.alphaValue = 0
+        evaluateFullscreen()
+        DispatchQueue.main.asyncAfter(deadline: .now() + spaceSettle) { [weak self] in
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.3
+                self?.panel.animator().alphaValue = 1
+            }
+        }
     }
 
     @objc private func suspendPoll() { pollSuspended = true }

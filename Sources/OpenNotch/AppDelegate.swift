@@ -155,7 +155,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "OpenNotch")
+        // The app logo (bundle icon), in colour; outside a bundle fall back to the symbol.
+        if Bundle.main.url(forResource: "AppIcon", withExtension: "icns") != nil,
+           let logo = NSApp.applicationIconImage?.copy() as? NSImage {
+            logo.size = NSSize(width: 18, height: 18)
+            item.button?.image = logo
+        } else {
+            item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "OpenNotch")
+        }
 
         let menu = NSMenu()
 
