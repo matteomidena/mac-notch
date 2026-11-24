@@ -42,7 +42,7 @@ public struct EqualizerBars: View {
         self.isPlaying = isPlaying
         self.barHeight = barHeight
     }
-    static func level(i: Int, t: Double, isPlaying: Bool, reduceMotion: Bool) -> Double {
+    nonisolated static func level(i: Int, t: Double, isPlaying: Bool, reduceMotion: Bool) -> Double {
         guard isPlaying else { return 0.22 }
         if reduceMotion { return [0.45, 0.75, 0.55][i] }
         return 0.25 + 0.75 * (sin(t * 6.0 + Double(i) * 1.7) * 0.5 + 0.5)
