@@ -8,3 +8,4 @@ build/
 *.notchplugin/
 .swiftpm/
 *.xcodeproj
+brag-output/

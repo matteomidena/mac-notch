@@ -1,5 +1,7 @@
 # OpenNotch
 
+[![OpenNotch in 20 seconds](docs/media/opennotch.gif)](docs/media/opennotch.mp4)
+
 A native macOS notch app. Hovering the notch expands it into a panel showing a
 now-playing card with play/pause/next/previous, live progress scrubber, and
 source badge, driven through a small plugin API (`OpenNotchKit`) so the notch UI
