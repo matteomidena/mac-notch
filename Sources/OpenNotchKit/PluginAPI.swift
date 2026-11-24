@@ -106,6 +106,9 @@ public extension PluginHost {
     // physical notch (leading = left of notch, trailing = right). Default nil.
     func compactLeading() -> AnyView?
     func compactTrailing() -> AnyView?
+    // Optional views in the open panel's top strip, beside the camera. Default nil.
+    func openLeading() -> AnyView?
+    func openTrailing() -> AnyView?
     func quickActions() -> [QuickAction]
     // Optional settings pane shown under Settings → Plugins. Default nil.
     func settingsPane() -> AnyView?
@@ -114,6 +117,8 @@ public extension PluginHost {
 public extension NotchPlugin {
     func compactLeading() -> AnyView? { nil }
     func compactTrailing() -> AnyView? { nil }
+    func openLeading() -> AnyView? { nil }
+    func openTrailing() -> AnyView? { nil }
     func quickActions() -> [QuickAction] { [] }
     func settingsPane() -> AnyView? { nil }
 }

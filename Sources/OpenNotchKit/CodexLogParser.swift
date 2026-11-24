@@ -37,9 +37,17 @@ public enum CodexLogParser {
                 }
             } else if ptype == "user_message" {
                 out.userPrompt = payload["message"] as? String
+                out.state = .working; out.detail = "Thinking"
+            } else if ptype == "task_started" {
+                out.state = .working
+            } else if ptype == "task_complete" || ptype == "turn_aborted" {
+                out.state = .needsYou
             }
         case "response_item":
-            if ptype == "message", payload["role"] as? String == "user",
+            if ptype == "function_call" || ptype == "custom_tool_call" || ptype == "local_shell_call" {
+                out.state = .working
+                out.detail = codexDetail(payload)
+            } else if ptype == "message", payload["role"] as? String == "user",
                let blocks = payload["content"] as? [[String: Any]] {
                 let texts = blocks.compactMap { $0["type"] as? String == "input_text" ? $0["text"] as? String : nil }
                 let joined = texts.joined(separator: "\n")
@@ -48,5 +56,18 @@ public enum CodexLogParser {
         default: break
         }
         return out
+    }
+
+    static func codexDetail(_ p: [String: Any]) -> String {
+        let name = p["name"] as? String ?? ""
+        if name == "apply_patch" { return "Editing files" }
+        let args = (p["arguments"] as? String).flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+            ?? (p["action"] as? [String: Any]) ?? [:]
+        let cmd = (args["cmd"] ?? args["command"]).flatMap { v -> String? in
+            if let s = v as? String { return s }
+            if let a = v as? [String] { return (a.first == "bash" || a.first == "zsh") ? a.last : a.joined(separator: " ") }
+            return nil
+        }
+        return cmd.map { String($0.prefix(60)) } ?? (name.isEmpty ? "Working" : name)
     }
 }

@@ -48,6 +48,8 @@ import SwiftUI
 
     public var compactLeading: [AnyView] { activePlugins.compactMap { $0.compactLeading() } }
     public var compactTrailing: [AnyView] { activePlugins.compactMap { $0.compactTrailing() } }
+    public var openLeading: [AnyView] { activePlugins.compactMap { $0.openLeading() } }
+    public var openTrailing: [AnyView] { activePlugins.compactMap { $0.openTrailing() } }
     public var quickActions: [QuickAction] { activePlugins.flatMap { $0.quickActions() } }
 
     // MARK: Settings surface

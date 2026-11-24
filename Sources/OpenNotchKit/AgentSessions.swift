@@ -38,11 +38,16 @@ public struct BurnRate: Equatable, Sendable {
     }
 }
 
+public enum SessionState: Sendable, Equatable { case working, needsYou }
+
 public struct AgentSession: Identifiable, Equatable, Sendable {
     public let id: String
     public let agent: AgentKind
     public var project: String
     public var firstPrompt: String?
+    public var title: String?
+    public var state: SessionState = .working
+    public var detail: String?
     public var startedAt: Date
     public var lastActivity: Date
     public var totals = TokenCounts()
@@ -52,6 +57,16 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     fileprivate var activeMinuteSet: Set<Int> = []
 
     public func isLive(at now: Date) -> Bool { now.timeIntervalSince(lastActivity) <= 300 }
+
+    // ponytail: a finished session counts as waiting for 30 min, then drops; no "dismiss" until asked for.
+    public static let waitingTTL: TimeInterval = 1800
+    public var needsYou: Bool { state == .needsYou }
+    /// Listed in the Agents tab: active in the last 5 min, or waiting on the user for up to `waitingTTL`.
+    public func isShown(at now: Date) -> Bool {
+        isLive(at: now) || (needsYou && now.timeIntervalSince(lastActivity) <= Self.waitingTTL)
+    }
+    /// Session name, else the first prompt, else the project.
+    public var displayTitle: String { title ?? firstPrompt ?? project }
 }
 
 public final class AgentSessions {
@@ -65,6 +80,8 @@ public final class AgentSessions {
     private var seenMessageIds: [String: Set<String>] = [:]   // fileKey -> Claude message ids
     private var previousCumulative: [String: TokenCounts] = [:]
     private var codexKeys: [String: String] = [:]             // fileKey -> roll-up key
+    private var childFiles: Set<String> = []                  // subagent / child-thread files: no say on state
+    private var titles: [String: String] = [:]                // roll-up key -> session name (may precede the session)
 
     public init() {}
 
@@ -75,13 +92,17 @@ public final class AgentSessions {
         }
         if agent == .codex, let thread = line.threadId {
             codexKeys[fileKey] = line.parentThreadId ?? thread
+            if line.parentThreadId != nil { childFiles.insert(fileKey) }
         }
+        if agent == .claude, pathIds?.parent != nil { childFiles.insert(fileKey) }
         let key: String?
         switch agent {
         case .claude: key = pathIds.map { $0.parent ?? $0.session }
         case .codex: key = codexKeys[fileKey]
         }
-        guard let key, let at = line.at else { return }
+        guard let key else { return }
+        if let t = line.title { titles[key] = t; sessions[key]?.title = t }
+        guard let at = line.at else { return }
 
         var delta = TokenCounts()
         switch line.tokens {
@@ -107,6 +128,13 @@ public final class AgentSessions {
         } else {
             session = AgentSession(id: key, agent: agent, project: "", startedAt: at, lastActivity: at,
                                    burn: BurnRate(window: rateWindow))
+            session.title = titles[key]
+        }
+        // Only the main conversation decides whether it waits on you; a subagent finishing is not the turn ending.
+        if let state = line.state, !childFiles.contains(fileKey), at >= session.lastActivity {
+            session.state = state
+            if state == .working || line.detail != nil { session.detail = line.detail ?? session.detail }
+            if state == .needsYou && line.detail == nil { session.detail = nil }
         }
         if at > session.lastActivity { session.lastActivity = at }
         if session.project.isEmpty, let cwd = line.cwd, !cwd.isEmpty {
@@ -126,9 +154,9 @@ public final class AgentSessions {
     }
 
     public func live(at now: Date) -> [AgentSession] {
-        sessions.values.filter { $0.isLive(at: now) }.sorted {
-            let (a, b) = ($0.burn.perMinute(at: now), $1.burn.perMinute(at: now))
-            return a != b ? a > b : $0.id < $1.id
+        sessions.values.filter { $0.isShown(at: now) }.sorted {
+            if $0.needsYou != $1.needsYou { return $0.needsYou }
+            return $0.lastActivity != $1.lastActivity ? $0.lastActivity > $1.lastActivity : $0.id < $1.id
         }
     }
 }

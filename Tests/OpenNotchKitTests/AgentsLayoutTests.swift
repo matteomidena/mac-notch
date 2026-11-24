@@ -4,13 +4,13 @@ import Foundation
 
 @Test func agentsPanelHeightHasMinimumOf300() {
     #expect(AgentsLayout.panelHeight(limitRows: 3, sessionRows: 0) == 300)
-    #expect(AgentsLayout.panelHeight(limitRows: 3, sessionRows: 2) == 300)
+    #expect(AgentsLayout.panelHeight(limitRows: 3, sessionRows: 1) == 300)
 }
 
-@Test func agentsPanelHeightGrows32PerRowPastMinimum() {
-    let at = AgentsLayout.panelHeight(limitRows: 3, sessionRows: 6)
+@Test func agentsPanelHeightGrowsOneSessionRowPastMinimum() {
+    let at = AgentsLayout.panelHeight(limitRows: 3, sessionRows: 3)
     #expect(at > 300)
-    #expect(AgentsLayout.panelHeight(limitRows: 3, sessionRows: 7) == at + 32)
+    #expect(AgentsLayout.panelHeight(limitRows: 3, sessionRows: 4) == at + AgentsLayout.sessionRowHeight)
 }
 
 @Test func agentsPanelHeightCapsAt480() {

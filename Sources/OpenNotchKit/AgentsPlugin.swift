@@ -15,6 +15,20 @@ import SwiftUI
     // The Music side owns the left wing.
     public func compactLeading() -> AnyView? { nil }
     public func compactTrailing() -> AnyView? { AnyView(AgentsFigure(service: host.agents)) }
+    // Left of the camera belongs to Music; the 5h reset lives in its limit row.
+    public func openTrailing() -> AnyView? { AnyView(BurnRateLabel(service: host.agents)) }
+}
+
+/// Tokens per minute across every live session.
+public func totalBurn(_ sessions: [AgentSession], at now: Date) -> Double {
+    sessions.reduce(0) { $0 + $1.burn.perMinute(at: now) }
+}
+
+/// Time left until `resetsAt`: "2h 14m", "14m", nil once it has passed.
+public func resetText(_ resetsAt: Date?, now: Date) -> String? {
+    guard let resetsAt, resetsAt > now else { return nil }
+    let m = Int(resetsAt.timeIntervalSince(now) / 60)
+    return m >= 60 ? "\(m / 60)h \(m % 60)m" : "\(max(m, 1))m"
 }
 
 public enum StripAction: Equatable { case redirect, stop, dismiss }

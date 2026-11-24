@@ -2,7 +2,8 @@ import Foundation
 
 /// Height of the open notch on the Agents tab: it grows with the rows, between today's 300 and a cap.
 public enum AgentsLayout {
-    public static let rowHeight: CGFloat = 32
+    public static let rowHeight: CGFloat = 32         // limit rows
+    public static let sessionRowHeight: CGFloat = 46  // title + status line
     public static let minHeight: CGFloat = 300
     public static let maxHeight: CGFloat = 480
 
@@ -14,6 +15,6 @@ public enum AgentsLayout {
     static let chrome: CGFloat = 38 + 4 + 10 + 35 + 8 + 10
 
     public static func panelHeight(limitRows: Int, sessionRows: Int) -> CGFloat {
-        min(maxHeight, max(minHeight, chrome + rowHeight * CGFloat(limitRows + sessionRows)))
+        min(maxHeight, max(minHeight, chrome + rowHeight * CGFloat(limitRows) + sessionRowHeight * CGFloat(sessionRows)))
     }
 }

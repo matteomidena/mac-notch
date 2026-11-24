@@ -2,26 +2,90 @@ import SwiftUI
 
 private let fill = Hex.ink.opacity(0.024)
 
-/// Closed-notch figure: the inverted badge while a runaway is flagged, else the tightest limit.
+/// Closed-notch figure. Priority: runaway badge, then how many sessions wait on you,
+/// else the weekly Claude / Codex usage, alternating every 4 s.
 struct AgentsFigure: View {
     let service: AgentUsageService
     var body: some View {
-        let now = Date()
+        let waiting = service.liveSessions.filter(\.needsYou).count
         if let alert = service.alert {
             Text(multipleText(alert.multiple))
                 .font(Hex.mono(12)).foregroundStyle(Hex.bg)
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(Hex.ink, in: RoundedRectangle(cornerRadius: 5.6))
-        } else if let tight = tightestLimit(service.limits, at: now) {
-            let pct = tight.window.percent(at: now)
-            VStack(alignment: .trailing, spacing: 3) {
-                Text("\(Int(pct.rounded()))%").font(Hex.mono(12)).foregroundStyle(Hex.ink)
-                Capsule().fill(Hex.line(0.10)).frame(width: 24, height: 1.5)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(Hex.ink).frame(width: 24 * min(max(pct, 0), 100) / 100, height: 1.5)
+        } else if waiting > 0 {
+            HStack(spacing: 5) {
+                PulseDot(color: Hex.attention)
+                Text("\(waiting)").font(Hex.mono(13).weight(.semibold)).foregroundStyle(Hex.attention)
+            }
+            .transition(.opacity)
+        } else {
+            let weekly = weeklyLimits(service.limits)
+            if !weekly.isEmpty {
+                TimelineView(.periodic(from: .now, by: 4)) { ctx in
+                    let (agent, w) = weekly[Int(ctx.date.timeIntervalSince1970 / 4) % weekly.count]
+                    let pct = w.percent(at: ctx.date)
+                    HStack(spacing: 5) {
+                        if service.liveSessions.contains(where: { $0.isLive(at: ctx.date) }) {
+                            PulseDot(color: Hex.running, size: 5)
+                        }
+                        AgentMark(agent: agent, size: 12)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("\(Int(pct.rounded()))%").font(Hex.mono(12)).foregroundStyle(Hex.ink)
+                            Capsule().fill(Hex.line(0.10)).frame(width: 24, height: 1.5)
+                                .overlay(alignment: .leading) {
+                                    Capsule().fill(Hex.ink).frame(width: 24 * min(max(pct, 0), 100) / 100, height: 1.5)
+                                }
+                        }
                     }
+                    .id(agent)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.35), value: agent)
+                }
             }
         }
+    }
+}
+
+/// Breathing status dot: amber while sessions wait on you, green while agents work.
+struct PulseDot: View {
+    let color: Color
+    var size: CGFloat = 7
+    @State private var on = false
+    var body: some View {
+        Circle().fill(color).frame(width: size, height: size)
+            .shadow(color: color.opacity(on ? 0.9 : 0.2), radius: on ? 4 : 1)
+            .opacity(on ? 1 : 0.45)
+            .scaleEffect(on ? 1 : 0.8)
+            .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { on = true } }
+    }
+}
+
+/// The weekly window per agent, Claude first.
+func weeklyLimits(_ all: [PlanLimits]) -> [(AgentKind, LimitWindow)] {
+    AgentKind.allCases.compactMap { agent in
+        all.first { $0.agent == agent }?.windows.first { $0.label == "Weekly" }.map { (agent, $0) }
+    }
+}
+
+/// "5m 16s", "58s", "1h 4m"
+func elapsedText(_ seconds: TimeInterval) -> String {
+    let s = max(0, Int(seconds))
+    if s < 60 { return "\(s)s" }
+    if s < 3600 { return "\(s / 60)m \(s % 60)s" }
+    return "\(s / 3600)h \(s % 3600 / 60)m"
+}
+
+/// Rounded app tile with the agent's mark, like a dock icon.
+struct AgentTile: View {
+    let agent: AgentKind
+    var size: CGFloat = 28
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.25)
+            .fill(agent == .claude ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
+                                   : Color(red: 0x3D / 255, green: 0x5A / 255, blue: 0xFE / 255))
+            .frame(width: size, height: size)
+            .overlay { AgentMark(agent: agent, size: size * 0.6) }
     }
 }
 
@@ -70,54 +134,77 @@ struct AgentsTabView: View {
     let service: AgentUsageService
 
     var body: some View {
-        let now = Date()
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            let now = ctx.date
+            let sessions = service.liveSessions
+            let waiting = sessions.filter(\.needsYou).count
+            VStack(spacing: 8) {
+                // Limits stay put on top; the session list below grows and shrinks.
+                limitsPanel(now)
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Agents").font(Hex.text(14, weight: .semibold)).foregroundStyle(Hex.ink)
+                        Spacer()
+                        if waiting > 0 {
+                            Text("\(waiting) NEEDS YOU").font(Hex.mono(10)).foregroundStyle(Hex.attention)
+                        } else if !sessions.isEmpty {
+                            Text("\(sessions.count) RUNNING").font(Hex.mono(10)).foregroundStyle(Hex.running)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    if sessions.isEmpty {
+                        row { Text("No agents running").font(Hex.text(12.5)).foregroundStyle(Hex.muted); Spacer() }
+                    } else {
+                        ScrollView {
+                            VStack(spacing: 0) { ForEach(sessions) { sessionRow($0, now) } }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .scrollIndicators(.never)  // a legacy scroller gutter left a gap on the right
+                    }
+                }
+                .panel()
+            }
+            .frame(maxWidth: 440)
+        }
+    }
+
+    @ViewBuilder private func limitsPanel(_ now: Date) -> some View {
         let claude = service.limits.first { $0.agent == .claude }
         let codex = service.limits.first { $0.agent == .codex }
-        VStack(spacing: 8) {
-            VStack(spacing: 0) {
-                HStack { Text("Agents").font(Hex.text(14, weight: .semibold)).foregroundStyle(Hex.ink); Spacer() }
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                if let claude {
-                    ForEach(claude.windows, id: \.label) { limitRow("Claude · \($0.label)", $0, now, age: limitAgeText(fetchedAt: claude.fetchedAt, now: now)) }
-                } else {
-                    row {
-                        AgentMark(agent: .claude, size: 11)
-                        Text("Claude").font(Hex.text(12.5)).foregroundStyle(Hex.muted)
-                        Spacer()
-                        Text("—").font(Hex.mono(12)).foregroundStyle(Hex.ink)
-                        Text("Connect in Settings").font(Hex.text(12)).foregroundStyle(Hex.muted)
-                    }
+        VStack(spacing: 0) {
+            if let claude {
+                ForEach(claude.windows, id: \.label) { w in
+                    // The 5h row also says when it resets.
+                    let reset = w.label == "5h" ? resetText(w.resetsAt, now: now).map { " – resets in \($0)" } ?? "" : ""
+                    limitRow(.claude, "Claude · \(w.label)\(reset)", w, now, age: limitAgeText(fetchedAt: claude.fetchedAt, now: now))
                 }
-                if let codex {
-                    ForEach(codex.windows, id: \.label) { limitRow("Codex · \($0.label)", $0, now) }
+            } else {
+                row {
+                    AgentTile(agent: .claude, size: 20)
+                    Text("Claude").font(Hex.text(12.5)).foregroundStyle(Hex.muted)
+                    Spacer()
+                    Text("Connect in Settings").font(Hex.text(12)).foregroundStyle(Hex.muted)
                 }
             }
-            .panel()
-            if !service.liveSessions.isEmpty {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(service.liveSessions) { sessionRow($0, now) }
-                    }
-                    .panel()
-                }
-                .scrollBounceBehavior(.basedOnSize)
+            if let codex {
+                ForEach(codex.windows, id: \.label) { limitRow(.codex, "Codex · \($0.label)", $0, now) }
             }
         }
-        .frame(maxWidth: 440)
+        .panel()
     }
 
     private func row<C: View>(@ViewBuilder _ c: () -> C) -> some View {
         HStack(spacing: 10, content: c)
-            .padding(.horizontal, 12).padding(.vertical, 7).frame(minHeight: 32)
+            .padding(.horizontal, 12).padding(.vertical, 7).frame(minHeight: AgentsLayout.rowHeight)
             .overlay(alignment: .top) { Hex.line(0.07).frame(height: 1) }
     }
 
-    private func limitRow(_ title: String, _ w: LimitWindow, _ now: Date, age: String? = nil) -> some View {
+    private func limitRow(_ agent: AgentKind, _ title: String, _ w: LimitWindow, _ now: Date, age: String? = nil) -> some View {
         let pct = w.percent(at: now)
         let filled = Int((pct / 10).rounded())
         return row {
             HStack(spacing: 6) {
-                AgentMark(agent: title.hasPrefix("Claude") ? .claude : .codex, size: 11)
+                AgentTile(agent: agent, size: 20)
                 Text(title).font(Hex.text(12.5)).foregroundStyle(Hex.muted)
             }
             Spacer()
@@ -134,24 +221,40 @@ struct AgentsTabView: View {
     }
 
     private func sessionRow(_ s: AgentSession, _ now: Date) -> some View {
-        let rate = s.burn.perMinute(at: now)
         let flagged = service.alert?.session.id == s.id
-        let normal = service.normalRate[s.agent]
-        let times = normal.flatMap { $0 > 0 ? multipleText(rate / $0) : nil } ?? "—"
-        return row {
-            Tag(agent: s.agent)
-            Text(s.project).font(Hex.text(13, weight: .medium)).foregroundStyle(Hex.ink).lineLimit(1)
-            Spacer()
-            Spark(values: s.burn.history(at: now))
-            Text("\(compactCount(rate))/min").font(Hex.mono(12)).foregroundStyle(Hex.muted)
-            Text(times).font(Hex.mono(12)).foregroundStyle(flagged ? Hex.bg : Hex.code)
-                .padding(.horizontal, flagged ? 6 : 0).padding(.vertical, flagged ? 3 : 0)
-                .background(flagged ? Hex.ink : .clear, in: RoundedRectangle(cornerRadius: 5.6))
-            if flagged && s.agent == .claude && service.canControl {
-                KeyCap(title: "Stop", hint: "esc", primary: true) { service.stop(sessionId: s.id) }
-                    .scaleEffect(0.8).frame(width: 56, height: 28)
+        let tint = s.needsYou ? Hex.attention : Hex.running
+        let status = s.needsYou ? "NEEDS YOU" : "RUNNING"
+        let detail = s.detail ?? (s.needsYou ? "Your turn" : s.project)
+        // Running: how long it has been going. Waiting: how long it has waited.
+        let elapsed = now.timeIntervalSince(s.needsYou ? s.lastActivity : s.startedAt)
+        return HStack(spacing: 10) {
+            AgentTile(agent: s.agent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(s.displayTitle).font(Hex.text(13, weight: .medium)).foregroundStyle(Hex.ink).lineLimit(1)
+                HStack(spacing: 5) {
+                    PulseDot(color: tint, size: 5)
+                    Text("\(status) · \(detail.uppercased())").font(Hex.mono(10)).foregroundStyle(tint).lineLimit(1)
+                }
             }
+            Spacer(minLength: 8)
+            if flagged {
+                Text(multipleText(service.alert?.multiple ?? 0)).font(Hex.mono(11)).foregroundStyle(Hex.bg)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Hex.ink, in: RoundedRectangle(cornerRadius: 5.6))
+                if s.agent == .claude && service.canControl {
+                    KeyCap(title: "Stop", hint: "esc", primary: true) { service.stop(sessionId: s.id) }
+                        .scaleEffect(0.8).frame(width: 56, height: 28)
+                }
+            }
+            Text(elapsedText(elapsed)).font(Hex.mono(11)).foregroundStyle(Hex.muted)
         }
+        .padding(.horizontal, 10).padding(.vertical, 8).frame(minHeight: AgentsLayout.sessionRowHeight)
+        .background(s.needsYou ? Hex.attention.opacity(0.07) : .clear)
+        .overlay(alignment: .leading) {
+            if s.needsYou { Hex.attention.frame(width: 2) }
+        }
+        .overlay(alignment: .top) { Hex.line(0.07).frame(height: 1) }
+        .help(s.firstPrompt ?? s.project)
     }
 }
 
@@ -266,5 +369,22 @@ public struct RunawayStrip: View {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !t.isEmpty { service.redirect(sessionId: id, text: t) }
         close()
+    }
+}
+
+// MARK: - Open panel strip, beside the camera
+
+/// Left of the camera: live token burn across all sessions.
+struct BurnRateLabel: View {
+    let service: AgentUsageService
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            let rate = totalBurn(service.liveSessions, at: ctx.date)
+            HStack(spacing: 5) {
+                if rate > 0 { PulseDot(color: Hex.running, size: 5) }
+                Text("\(compactCount(rate)) tok/min").font(Hex.mono(11))
+                    .foregroundStyle(rate > 0 ? Hex.ink : Hex.muted)
+            }
+        }
     }
 }

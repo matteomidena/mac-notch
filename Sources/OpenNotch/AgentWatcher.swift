@@ -59,7 +59,7 @@ actor AgentWatcher {
     init(publish: @escaping @Sendable (AgentSnapshot) -> Void) { self.publish = publish }
 
     func start() {
-        let live = AgentRoots.files(since: Date().addingTimeInterval(-300))
+        let live = AgentRoots.files(since: Date().addingTimeInterval(-AgentSession.waitingTTL))
         for path in live { read(path) }
         log.info("launch scan: \(live.count) live files, \(self.sessions.sessions.count) sessions")
         emit()

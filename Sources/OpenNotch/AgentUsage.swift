@@ -32,6 +32,13 @@ final class AgentUsage: AgentUsageService {
     init(installer: HookInstaller = HookInstaller()) { self.installer = installer }
 
     func start() {
+        // Show the last good Claude snapshot right away: a restart or a failed fetch
+        // used to blank the row until the next success.
+        if UserDefaults.standard.bool(forKey: ClaudeUsageClient.connectedKey),
+           let data = UserDefaults.standard.data(forKey: Self.snapshotKey),
+           let saved = try? JSONDecoder().decode(PlanLimits.self, from: data) {
+            claudeLimits = saved; publishLimits()
+        }
         let w = AgentWatcher { [weak self] snap in Task { @MainActor in self?.apply(snap) } }
         watcher = w
         Task { await w.start() }
@@ -105,7 +112,11 @@ final class AgentUsage: AgentUsageService {
         }
     }
 
-    private func publishLimits() { limits = [claudeLimits, codexLimits].compactMap { $0 } }
+    private static let snapshotKey = "cafe.notch.agents.claudeSnapshot"
+    private func publishLimits() {
+        limits = [claudeLimits, codexLimits].compactMap { $0 }
+        UserDefaults.standard.set(claudeLimits.flatMap { try? JSONEncoder().encode($0) }, forKey: Self.snapshotKey)
+    }
 
     /// Claude only. The hook drops the in-flight tool call on stop, so nothing here promises it finishes.
     private func send(_ action: DirectiveAction, _ id: String) {
@@ -144,10 +155,11 @@ final class AgentUsage: AgentUsageService {
                 best = (RunawayAlert(session: s, multiple: rate / normal, normal: normal), rate / normal)
             }
         }
-        liveSessions = live
+        liveSessions = sessions.filter { $0.isShown(at: now) }
         alert = alertsEnabled ? best?.0 : nil
         // The detector measures its hold between update timestamps, and file events can be sparse.
-        if alert != nil || hot {
+        // Waiting sessions must also age out of the list (and the count) without new file events.
+        if alert != nil || hot || liveSessions.contains(where: \.needsYou) {
             if reevalTimer == nil {
                 reevalTimer = Task { [weak self] in
                     while !Task.isCancelled {

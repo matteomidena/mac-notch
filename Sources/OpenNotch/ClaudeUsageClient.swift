@@ -1,24 +1,27 @@
 import Foundation
 import OpenNotchKit
-import Security
 
 /// Host-side IO for the Claude usage flow. The token lives only in these call frames: never logged, stored or written back.
 enum ClaudeUsageClient {
     static let connectedKey = "cafe.notch.agents.claudeConnected"
 
-    /// Blocks while the macOS prompt is up: call off the main actor only. Read-only.
+    /// Read-only, off the main actor. Goes through /usr/bin/security, not SecItemCopyMatching: Claude Code
+    /// writes the item with that tool, so it is already on the item's ACL and macOS never prompts. A direct
+    /// read prompted again after every Claude token refresh and every rebuild (ad-hoc signature changes).
     static func readCredential() -> ClaudeCredentialRead {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var out: CFTypeRef?
-        switch SecItemCopyMatching(query as CFDictionary, &out) {
-        case errSecSuccess: return (out as? Data).map { .data($0) } ?? .notFound
-        case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed: return .denied
-        default: return .notFound
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        p.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return .notFound }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        switch p.terminationStatus {
+        case 0: return .data(data)
+        case 128: return .denied  // errSecUserCanceled surfaced by security(1)
+        default: return .notFound // 44: no item
         }
     }
 

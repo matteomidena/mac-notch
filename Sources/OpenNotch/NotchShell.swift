@@ -47,6 +47,8 @@ struct NotchPanelShape: Shape {
     var notchGap: CGFloat = 200         // physical notch width left transparent in the middle
     @ObservationIgnored var compactLeading: AnyView?
     @ObservationIgnored var compactTrailing: AnyView?
+    @ObservationIgnored var openLeading: AnyView?
+    @ObservationIgnored var openTrailing: AnyView?
     init(widgets: [PluginWidget]) { self.widgets = widgets }
 
     /// Island feel (spec M2.0): bouncy open, snappy close. Tuning knobs.
@@ -171,7 +173,14 @@ struct NotchShell: View {
     @ViewBuilder private var content: some View {
         if model.isOpen {
             VStack(spacing: 0) {
-                Color.clear.frame(height: model.topInset)
+                // The strip beside the camera: live status from plugins.
+                HStack(spacing: 0) {
+                    model.openLeading
+                    Spacer(minLength: model.notchGap)
+                    model.openTrailing
+                }
+                .padding(.horizontal, 18)
+                .frame(height: model.topInset)
                 tabContent
                     .padding(.horizontal, 16).padding(.bottom, 10).padding(.top, 4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

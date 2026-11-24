@@ -59,6 +59,8 @@ final class NotchController: NSObject {
         model = NotchViewModel(widgets: runtime.widgets)
         model.compactLeading = runtime.compactLeading.first
         model.compactTrailing = runtime.compactTrailing.first
+        model.openLeading = runtime.openLeading.first
+        model.openTrailing = runtime.openTrailing.first
         model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
         model.tabs = runtime.tabs
@@ -139,7 +141,7 @@ final class NotchController: NSObject {
 
     /// Ambient bar shows when media is present or any plan limit exists.
     private func ambientWanted() -> Bool {
-        nowPlaying.current != nil || !agents.limits.isEmpty
+        nowPlaying.current != nil || !agents.limits.isEmpty || agents.liveSessions.contains(where: \.needsYou)
     }
 
     private var expandedSize: CGSize {

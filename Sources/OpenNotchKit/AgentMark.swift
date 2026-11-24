@@ -40,8 +40,10 @@ struct AgentMark: View {
         switch agent {
         case .claude:
             if let image = images[.claude] {
+                // The tray template carries menu-bar padding: draw it 1.5× so it matches the Codex mark.
                 image.renderingMode(.template).resizable().scaledToFit()
-                    .foregroundStyle(Hex.ink).frame(width: size, height: size)
+                    .foregroundStyle(Hex.ink).frame(width: size * 1.5, height: size * 1.5)
+                    .frame(width: size, height: size)
             }
         case .codex:
             CodexCloud().fill(Hex.ink).frame(width: size, height: size)

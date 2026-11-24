@@ -13,11 +13,16 @@ public struct ParsedLogLine: Equatable, Sendable {
     public var threadId: String?
     public var parentThreadId: String?
     public var limits: PlanLimits?   // Codex only
+    public var state: SessionState?  // what this line says the session is doing now
+    public var detail: String?       // e.g. "Editing Foo.swift", "npm test"
+    public var title: String?        // Claude session name (custom-title / agent-name)
 
     public init(at: Date? = nil, tokens: TokenReport? = nil, cwd: String? = nil, userPrompt: String? = nil,
-                threadId: String? = nil, parentThreadId: String? = nil, limits: PlanLimits? = nil) {
+                threadId: String? = nil, parentThreadId: String? = nil, limits: PlanLimits? = nil,
+                state: SessionState? = nil, detail: String? = nil, title: String? = nil) {
         self.at = at; self.tokens = tokens; self.cwd = cwd; self.userPrompt = userPrompt
         self.threadId = threadId; self.parentThreadId = parentThreadId; self.limits = limits
+        self.state = state; self.detail = detail; self.title = title
     }
 }
 
@@ -50,6 +55,21 @@ public enum ClaudeLogParser {
                                             output: usage["output_tokens"] as? Int ?? 0),
                                 messageId: message?["id"] as? String)
         }
+        if let t = (obj["customTitle"] ?? obj["agentName"]) as? String, !t.isEmpty { out.title = t }
+        if type == "assistant", let blocks = message?["content"] as? [[String: Any]] {
+            if let tool = blocks.last(where: { $0["type"] as? String == "tool_use" }) {
+                let name = tool["name"] as? String ?? ""
+                if ClaudeLogParser.asksUser.contains(name) {
+                    out.state = .needsYou; out.detail = name == "ExitPlanMode" ? "Plan ready" : "Asking a question"
+                } else {
+                    out.state = .working; out.detail = toolDetail(name, tool["input"] as? [String: Any] ?? [:])
+                }
+            } else if message?["stop_reason"] as? String == "end_turn" {
+                out.state = .needsYou
+            } else {
+                out.state = .working
+            }
+        }
         if type == "user", obj["isMeta"] as? Bool != true {
             if let s = message?["content"] as? String {
                 out.userPrompt = s
@@ -59,7 +79,31 @@ public enum ClaudeLogParser {
                 out.userPrompt = texts.isEmpty ? nil : texts.joined(separator: "\n")
             }
         }
+        if type == "user", obj["isMeta"] as? Bool != true, message != nil {
+            let interrupted = out.userPrompt?.hasPrefix("[Request interrupted") ?? false
+            out.state = interrupted ? .needsYou : .working
+            if out.userPrompt != nil && !interrupted { out.detail = "Thinking" }
+        }
         return out
+    }
+
+    /// Tools that stop the turn until the user answers.
+    static let asksUser: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+
+    static func toolDetail(_ name: String, _ input: [String: Any]) -> String {
+        let file = (input["file_path"] as? String ?? input["notebook_path"] as? String)
+            .map { URL(fileURLWithPath: $0).lastPathComponent }
+        switch name {
+        case "Bash": return (input["description"] as? String) ?? (input["command"] as? String).map { String($0.prefix(60)) } ?? "Running a command"
+        case "Edit", "MultiEdit", "Write", "NotebookEdit": return "Editing " + (file ?? "files")
+        case "Read": return "Reading " + (file ?? "files")
+        case "Grep", "Glob": return "Searching"
+        case "Task", "Agent": return "Running a subagent"
+        case "WebFetch", "WebSearch": return "Browsing the web"
+        default:
+            // mcp__server__tool → "tool"
+            return name.hasPrefix("mcp__") ? (name.components(separatedBy: "__").last ?? name) : name
+        }
     }
 
     /// `…/<enc-cwd>/<uuid>.jsonl` → (uuid, nil); `…/<enc-cwd>/<uuid>/subagents/<name>.jsonl` → (name, uuid); else nil

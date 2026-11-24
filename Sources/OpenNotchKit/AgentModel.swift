@@ -40,7 +40,7 @@ public enum TokenWeights {
     }
 }
 
-public struct LimitWindow: Equatable, Sendable {
+public struct LimitWindow: Equatable, Sendable, Codable {
     public let label: String
     public let usedPercent: Double
     public let resetsAt: Date?
@@ -58,7 +58,7 @@ public struct LimitWindow: Equatable, Sendable {
     }
 }
 
-public struct PlanLimits: Equatable, Sendable {
+public struct PlanLimits: Equatable, Sendable, Codable {
     public let agent: AgentKind
     public let windows: [LimitWindow]
     public let fetchedAt: Date
