@@ -12,7 +12,7 @@ private let log = Logger(subsystem: "cafe.notch", category: "media")
     public private(set) var isAvailable = true
     @ObservationIgnored private var restartPolicy = RestartPolicy()
     @ObservationIgnored private var stopping = false
-    @ObservationIgnored private var lastRaw: NowPlayingInfo?
+    @ObservationIgnored private var lastRaw: NowPlayingInfo?   // nil: nothing playing
     @ObservationIgnored private let perl = "/usr/bin/perl"
     @ObservationIgnored private let script: String       // vendor/.../mediaremote-adapter.pl
     @ObservationIgnored private let framework: String    // vendor/.../MediaRemoteAdapter.framework
@@ -54,11 +54,11 @@ private let log = Logger(subsystem: "cafe.notch", category: "media")
             // single JSON line spans multiple chunks. Buffer and only parse
             // complete newline-terminated lines; keep the trailing partial line.
             self.lineBuffer.append(chunk)
-            var latest: NowPlayingInfo?
+            var latest: NowPlayingInfo??   // .some(nil): the player went away
             while let nl = self.lineBuffer.firstIndex(of: 0x0A) {
                 let lineData = self.lineBuffer.subdata(in: self.lineBuffer.startIndex..<nl)
                 self.lineBuffer.removeSubrange(self.lineBuffer.startIndex...nl)
-                if let info = Self.parse(streamLine: lineData) { latest = info }
+                if let event = NowPlayingParser.parse(streamLine: lineData) { latest = event }
             }
             if let latest {
                 Task { @MainActor in
@@ -69,9 +69,7 @@ private let log = Logger(subsystem: "cafe.notch", category: "media")
                     // re-trigger every observer.
                     guard latest != self.lastRaw else { return }
                     self.lastRaw = latest
-                    var stamped = latest
-                    stamped.timestamp = Date()
-                    self.current = stamped
+                    self.current = latest.map { var s = $0; s.timestamp = Date(); return s }
                 }
             }
         }
@@ -105,18 +103,6 @@ private let log = Logger(subsystem: "cafe.notch", category: "media")
 
     deinit {
         stream?.terminate()
-    }
-
-    // `stream` wraps fields in an envelope {"type":"data","payload":{…}}, whereas
-    // `get` (what NowPlayingParser + the fixture were built against) puts fields at
-    // top level. Unwrap the payload and feed the parser get-style JSON.
-    nonisolated private static func parse(streamLine data: Data) -> NowPlayingInfo? {
-        guard let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let payload = env["payload"] as? [String: Any], !payload.isEmpty,
-              let payloadData = try? JSONSerialization.data(withJSONObject: payload),
-              let payloadLine = String(data: payloadData, encoding: .utf8)
-        else { return nil }
-        return NowPlayingParser.parse(line: payloadLine)
     }
 
     private func runAdapter(_ args: [String]) {

@@ -19,4 +19,17 @@ public enum NowPlayingParser {
         if let b64 = obj["artworkData"] as? String { info.artworkData = Data(base64Encoded: b64) }
         return info
     }
+
+    /// One `stream` line: `{"type":"data","payload":{…}}`. Returns nil for a line
+    /// that isn't a stream event, `.some(nil)` when the payload is empty (no player
+    /// reports now-playing info any more), else the parsed info.
+    public static func parse(streamLine data: Data) -> NowPlayingInfo?? {
+        guard let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let payload = env["payload"] as? [String: Any] else { return nil }
+        if payload.isEmpty { return .some(nil) }
+        guard let payloadData = try? JSONSerialization.data(withJSONObject: payload),
+              let line = String(data: payloadData, encoding: .utf8),
+              let info = parse(line: line) else { return nil }
+        return info
+    }
 }

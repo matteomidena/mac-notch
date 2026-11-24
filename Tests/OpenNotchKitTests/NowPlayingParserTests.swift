@@ -54,3 +54,12 @@ import Foundation
     let info = NowPlayingParser.parse(line: #"{"title":"Song","playing":true}"#)
     #expect(info?.sourceBundleId == nil)
 }
+
+@Test func streamEmptyPayloadMeansNothingPlaying() {
+    let cleared = NowPlayingParser.parse(streamLine: Data(#"{"type":"data","diff":false,"payload":{}}"#.utf8))
+    #expect(cleared != nil)          // a real event...
+    #expect(cleared! == nil)         // ...that clears the current track
+    let playing = NowPlayingParser.parse(streamLine: Data(#"{"type":"data","payload":{"title":"T","playing":true}}"#.utf8))
+    #expect(playing??.isPlaying == true)
+    #expect(NowPlayingParser.parse(streamLine: Data("not json".utf8)) == nil)
+}
