@@ -2,6 +2,8 @@
 
 [![OpenNotch in 20 seconds](docs/media/opennotch.gif)](docs/media/opennotch.mp4)
 
+<sub>Music: “We Love Tech House (Instrumental Mix)” by Hasenchat, [Jamendo](https://www.jamendo.com/track/1246299), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).</sub>
+
 A native macOS notch app. Hovering the notch expands it into a panel showing a
 now-playing card with play/pause/next/previous, live progress scrubber, and
 source badge, driven through a small plugin API (`OpenNotchKit`) so the notch UI
