@@ -5,8 +5,26 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.1.0}"
 swift build -c release
+
+# The helper framework is a build product and vendor/**/build/ is git-ignored, so
+# a clean checkout (CI included) must build it here — otherwise the app ships
+# without now-playing. Recipe from spike/README.md.
+# ponytail: host-arch only. Notched Macs are all Apple Silicon; add
+# `-arch x86_64 -arch arm64` if an Intel/universal build is ever needed.
+FW="vendor/mediaremote-adapter/build/MediaRemoteAdapter.framework"
+if [ ! -f "$FW/MediaRemoteAdapter" ]; then
+    echo "Building MediaRemoteAdapter framework..."
+    mkdir -p "$FW"
+    clang -dynamiclib -fobjc-arc -fvisibility=default \
+        -Ivendor/mediaremote-adapter/include -Ivendor/mediaremote-adapter/src \
+        vendor/mediaremote-adapter/src/adapter/*.m \
+        vendor/mediaremote-adapter/src/private/*.m \
+        vendor/mediaremote-adapter/src/utility/*.m \
+        -framework Foundation -framework AppKit -framework UniformTypeIdentifiers \
+        -o "$FW/MediaRemoteAdapter"
+    codesign --force --sign - "$FW/MediaRemoteAdapter"
+fi
 
 APP="build/OpenNotch.app"
 rm -rf "$APP"
@@ -27,7 +45,10 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$APP/Contents/Resources/mediaremote-adapter/.vscode" \
        "$APP/Contents/Resources/mediaremote-adapter/.git" 2>/dev/null || true
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+VERSION="$(sed -n 's/.*static let version = "\([^"]*\)".*/\1/p' Sources/OpenNotchKit/OpenNotchKit.swift)"
+[ -n "$VERSION" ] || { echo "cannot read version from OpenNotchKit.swift" >&2; exit 1; }
+
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -36,8 +57,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key><string>cafe.notch.OpenNotch</string>
     <key>CFBundleName</key><string>OpenNotch</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>__VERSION__</string>
-    <key>CFBundleVersion</key><string>__VERSION__</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+    <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
@@ -46,7 +67,6 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-sed -i '' "s/__VERSION__/$VERSION/g" "$APP/Contents/Info.plist"
 
 # Ad-hoc signature (spec M5: no Developer ID yet).
 codesign --force --deep --sign - "$APP"

@@ -4,36 +4,68 @@
 
 <sub>Music: “We Love Tech House (Instrumental Mix)” by Hasenchat, [Jamendo](https://www.jamendo.com/track/1246299), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).</sub>
 
-A native macOS notch app. Hovering the notch expands it into a panel showing a
-now-playing card with play/pause/next/previous, live progress scrubber, and
-source badge, driven through a small plugin API (`OpenNotchKit`) so the notch UI
-never touches MediaRemote directly.
+A native macOS notch app. Hover the notch and it expands into a panel — a
+now-playing card with play/pause/next/previous, a live progress scrubber you can
+drag to seek, a source badge for the app that's playing, and your quick-launch
+apps. On Macs without a notch it draws a pill in the same spot.
 
-## Running
+Everything in the panel is a **plugin**. Now-playing and the app launcher are
+first-party plugins built on the same public `OpenNotchKit` API a third-party
+plugin gets — the notch UI never touches MediaRemote directly.
 
-### Packaged app (recommended)
+## Install
+
+1. Download `OpenNotch-<version>.zip` from
+   [Releases](https://github.com/matteomidena/mac-notch/releases).
+2. Unzip and drag `OpenNotch.app` to `/Applications`.
+3. **Right-click the app → Open**, then confirm. Do this the first time only.
+
+Step 3 is not optional. OpenNotch is ad-hoc signed and **not notarized** — there
+is no paid Apple Developer account behind it — so double-clicking gets you
+"Apple could not verify OpenNotch is free of malware" with no way through.
+Right-click → Open is the documented Gatekeeper bypass. The terminal equivalent:
 
 ```bash
-./Scripts/make-app.sh
-open build/OpenNotch.app
+xattr -dr com.apple.quarantine /Applications/OpenNotch.app
 ```
 
-Produces a double-clickable, ad-hoc-signed `build/OpenNotch.app` with the
-MediaRemote adapter embedded in its Resources — launch it from anywhere (Finder,
-`open`) and now-playing streams. This is the path that makes "Launch at Login"
-work correctly.
+Requires macOS 14 or later on Apple Silicon. There's no Dock icon — OpenNotch is
+a menu-bar agent; its status item holds Settings and Quit.
 
-### Dev mode
+## Plugins
+
+Third-party plugins are `.notchplugin` bundles in:
+
+```
+~/Library/Application Support/OpenNotch/Plugins/
+```
+
+Drop one in and it loads without a relaunch (*replacing* one already loaded does
+need a relaunch — dlopened code can't be safely unloaded). Manage, disable, or
+uninstall them under **Settings → Plugins**.
+
+To write one, copy [`Templates/PluginTemplate/`](Templates/PluginTemplate/) —
+its README documents the entry point, the package format, and the API-version
+contract.
+
+## Building from source
 
 ```bash
-swift build
-swift run OpenNotch
+./Scripts/make-app.sh   # → build/OpenNotch.app, double-clickable
+./Scripts/release.sh    # → build/OpenNotch-<version>.zip, as shipped
 ```
 
-This launches an agent app (no Dock icon, `.accessory` activation policy).
-A status bar item appears with a menu. In dev mode the bridge resolves the
-adapter from `vendor/mediaremote-adapter/`, so `swift run` must be invoked from
-the package root.
+`make-app.sh` embeds the MediaRemote adapter (and builds its helper framework if
+missing) into the bundle's Resources, so the app runs from anywhere. This is the
+path that makes "Launch at Login" work.
+
+For a dev loop, `swift build && swift run OpenNotch` also works, but only from
+the package root — in dev mode the bridge resolves the adapter relative to the
+working directory.
+
+The version in `Sources/OpenNotchKit/OpenNotchKit.swift` is the single source of
+truth: it stamps the Info.plist, names the release zip, and CI refuses a release
+tag that disagrees with it.
 
 ## Tests
 
@@ -41,8 +73,11 @@ the package root.
 swift test
 ```
 
-Runs the logic-core test suite (`OpenNotchKitTests`) — pure logic, no UI or
-live MediaRemote dependency.
+The logic-core suite (`OpenNotchKitTests`) — pure logic, no UI, no live
+MediaRemote. Includes an integration test that compiles a fixture plugin and
+loads it through the real `dlopen` path.
+
+---
 
 ## Definition of Done (M2) — manual checklist
 
@@ -66,3 +101,20 @@ launched from Finder (not the repo root):
       fullscreen hides it within ~1s; exiting restores it.
 - [ ] Lock screen + unlock → notch returns.
 - [ ] Launch at Login works from the bundled app.
+
+## Definition of Done (M3) — manual checklist
+
+- [ ] Template `.notchplugin` in the Plugins folder loads on launch and renders
+      its widget in the expanded panel.
+- [ ] A freshly-downloaded (still-quarantined) plugin dropped into the folder is
+      de-quarantined on install and loads — with the app launched from Finder.
+- [ ] A plugin whose `apiVersion` major differs from the host is refused, with a
+      reason shown in Settings → Plugins.
+- [ ] A plugin that crashes during construct is skipped on the next launch,
+      appears as Blocked, and Unblock works.
+- [ ] Toggling a plugin off removes its widgets; the state survives relaunch.
+- [ ] Dropping a new plugin loads it without relaunch; replacing an existing one
+      logs "relaunch required" and does not hot-swap.
+- [ ] With two or more widgets the grid arranges them; the single-media case
+      looks unchanged.
+- [ ] `Templates/PluginTemplate/build.sh` produces a loadable `.notchplugin`.

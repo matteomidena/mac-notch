@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build
+      - run: swift test
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # A mistyped tag should fail here, not ship a mislabelled build.
+      - name: Check the tag matches OpenNotchKit.version
+        run: |
+          KIT="$(sed -n 's/.*static let version = "\([^"]*\)".*/\1/p' Sources/OpenNotchKit/OpenNotchKit.swift)"
+          TAG="${GITHUB_REF_NAME#v}"
+          [ "$KIT" = "$TAG" ] || { echo "tag $TAG != OpenNotchKit.version $KIT"; exit 1; }
+
+      - run: ./Scripts/release.sh
+
+      # Draft, always: the app is unsigned and the manual DoD is a human gate.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --draft --title "$GITHUB_REF_NAME" --generate-notes \
+            build/OpenNotch-*.zip
