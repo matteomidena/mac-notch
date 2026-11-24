@@ -142,12 +142,16 @@ final class NotchController: NSObject {
     }
 
     private func ambientSize() -> CGSize {
-        CGSize(width: model.notchGap + 94, height: model.topInset)
+        CGSize(width: model.notchGap + NotchViewModel.wing
+                      + (model.leadingWing ? NotchViewModel.wing : NotchViewModel.bareWing),
+               height: model.topInset)
     }
 
-    /// Ambient bar shows when media is present or any plan limit exists.
+    /// Ambient bar shows while media plays or any plan limit exists. A paused or
+    /// ended session (macOS drops its menu bar icon) doesn't count.
     private func ambientWanted() -> Bool {
-        nowPlaying.current != nil || !agents.limits.isEmpty || agents.liveSessions.contains(where: \.needsYou)
+        model.leadingWing = nowPlaying.current?.isPlaying ?? false
+        return model.leadingWing || !agents.limits.isEmpty || agents.liveSessions.contains(where: \.needsYou)
     }
 
     private var expandedSize: CGSize {

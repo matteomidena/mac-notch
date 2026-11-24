@@ -71,15 +71,14 @@ struct Marquee: View {
 struct CompactWing: View {
     let host: PluginHost
     var body: some View {
-        HStack(spacing: 4) {
-            ArtworkView(data: host.nowPlaying.current?.artworkData, size: 16, cornerRadius: 4)
-            // Paused: a frozen spectrum reads as broken, so only the source icon stays.
-            if host.nowPlaying.current?.isPlaying ?? false {
+        // Only while playing: a paused or ended session has no menu bar icon either.
+        if let info = host.nowPlaying.current, info.isPlaying {
+            HStack(spacing: 4) {
+                ArtworkView(data: info.artworkData, size: 16, cornerRadius: 4)
                 EqualizerBars(isPlaying: true, barHeight: 13).foregroundStyle(Hex.ink)
-                    .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .leading)))
             }
+            .offset(y: -3)
+            .transition(.opacity)
         }
-        .animation(.easeInOut(duration: 0.25), value: host.nowPlaying.current?.isPlaying)
-        .offset(y: -3)
     }
 }

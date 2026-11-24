@@ -45,6 +45,11 @@ struct NotchPanelShape: Shape {
     // Ambient bar (collapsed + has media): compact views flank the physical notch.
     var showAmbient = false
     var notchGap: CGFloat = 200         // physical notch width left transparent in the middle
+    /// Collapsed: media is playing, so the left wing is shown. Without it the bar
+    /// keeps only a sliver on the left and shifts right to stay on the notch.
+    var leadingWing = false
+    static let wing: CGFloat = 47, bareWing: CGFloat = 6
+    var ambientShift: CGFloat { !isOpen && showAmbient && !leadingWing ? (Self.wing - Self.bareWing) / 2 : 0 }
     @ObservationIgnored var compactLeading: AnyView?
     @ObservationIgnored var compactTrailing: AnyView?
     @ObservationIgnored var openLeading: AnyView?
@@ -153,10 +158,12 @@ struct NotchShell: View {
             NotchPanelShape(topRadius: 10, bottomRadius: model.isOpen ? 20 : 12)
                 .fill(.black)
                 .frame(width: model.footprint.width, height: model.footprint.height)
+                .offset(x: model.ambientShift)
             content
                 .frame(width: model.footprint.width, height: model.footprint.height,
                        alignment: .top)
                 .clipped()
+                .offset(x: model.ambientShift)
             if model.isOpen {
                 TabPill(model: model)
                     .padding(.top, model.footprint.height + NotchViewModel.pillGap)
@@ -224,7 +231,7 @@ struct NotchShell: View {
             Spacer(minLength: model.notchGap)
             model.compactTrailing
         }
-        .padding(.horizontal, 16)
+        .padding(.leading, model.leadingWing ? 16 : 0).padding(.trailing, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
     }
