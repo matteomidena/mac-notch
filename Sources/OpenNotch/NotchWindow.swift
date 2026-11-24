@@ -77,7 +77,9 @@ final class NotchController: NSObject {
                             backing: .buffered,
                             defer: false)
         panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // Not .canJoinAllSpaces: a per-Space window slides out with its Space during a switch,
+        // like the real menu bar, instead of staying put. spaceChanged() brings it to the new one.
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -355,13 +357,15 @@ final class NotchController: NSObject {
         evaluateFullscreen()
     }
 
-    /// Space switch (swipe, full-screen app): hide, then fade back in once it has settled,
+    /// Space switch (swipe, full-screen app): the panel left with the old Space; move it here hidden,
+    /// then fade it in once the switch has settled,
     /// instead of popping open under a cursor that happens to be at the top.
     @objc private func spaceChanged() {
         pendingHoverIn?.cancel(); pendingHoverIn = nil
         if stateMachine.phase == .expanded { transition(.hoverOut) }
         settleUntil = Date().addingTimeInterval(spaceSettle)
         panel.alphaValue = 0
+        panel.orderFrontRegardless()  // .moveToActiveSpace: follow the user into the new Space
         evaluateFullscreen()
         DispatchQueue.main.asyncAfter(deadline: .now() + spaceSettle) { [weak self] in
             NSAnimationContext.runAnimationGroup { ctx in

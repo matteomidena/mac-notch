@@ -33,6 +33,21 @@ enum AgentRoots {
         }
     }
 
+    /// Limits from the newest Codex log that reports them, for a launch after Codex went quiet.
+    static func newestCodexLimits() -> PlanLimits? {
+        guard let walker = FileManager.default.enumerator(
+            at: URL(fileURLWithPath: codex), includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
+        let dated = (walker.allObjects as? [URL] ?? []).filter { $0.pathExtension == "jsonl" }.map {
+            ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+        }
+        for (url, _) in dated.sorted(by: { $0.1 > $1.1 }).prefix(5) {
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
+            var splitter = LineSplitter()
+            if let l = splitter.feed(data).reversed().lazy.compactMap({ CodexLogParser.parse($0)?.limits }).first { return l }
+        }
+        return nil
+    }
+
     /// `*.jsonl` files under the existing roots modified at or after `since`.
     static func files(since: Date) -> [String] {
         var out: [String] = []
@@ -55,12 +70,14 @@ actor AgentWatcher {
     private var splitters: [String: LineSplitter] = [:]
     private let publish: @Sendable (AgentSnapshot) -> Void
     private var stream: FSEventStreamRef?
+    private var seededCodexLimits: PlanLimits?  // until a live Codex log reports newer ones
 
     init(publish: @escaping @Sendable (AgentSnapshot) -> Void) { self.publish = publish }
 
     func start() {
         let live = AgentRoots.files(since: Date().addingTimeInterval(-AgentSession.waitingTTL))
         for path in live { read(path) }
+        if sessions.latestLimits[.codex] == nil { seededCodexLimits = AgentRoots.newestCodexLimits() }
         log.info("launch scan: \(live.count) live files, \(self.sessions.sessions.count) sessions")
         emit()
         startStream()
@@ -77,7 +94,7 @@ actor AgentWatcher {
     }
 
     private func emit() {
-        publish(AgentSnapshot(live: sessions.live(at: Date()), codexLimits: sessions.latestLimits[.codex]))
+        publish(AgentSnapshot(live: sessions.live(at: Date()), codexLimits: sessions.latestLimits[.codex] ?? seededCodexLimits))
     }
 
     private func read(_ path: String) {

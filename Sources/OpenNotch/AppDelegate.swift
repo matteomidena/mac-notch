@@ -153,16 +153,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The logo as a template glyph (a screen with its notch and the glow under it), so macOS tints it
+    /// like the other menu bar icons.
+    static func menuBarGlyph() -> NSImage {
+        let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+            NSColor.black.set()
+            let screen = NSBezierPath(roundedRect: NSRect(x: 1.75, y: 3.25, width: 14.5, height: 11.5), xRadius: 3, yRadius: 3)
+            screen.lineWidth = 1.5
+            screen.stroke()
+            NSBezierPath(roundedRect: NSRect(x: 5.5, y: 3, width: 7, height: 3.5), xRadius: 1.5, yRadius: 1.5).fill()
+            let glow = NSBezierPath()  // three rays of light under the notch
+            glow.move(to: NSPoint(x: 9, y: 8.25)); glow.line(to: NSPoint(x: 9, y: 10.25))
+            glow.move(to: NSPoint(x: 6, y: 7.75)); glow.line(to: NSPoint(x: 5, y: 9.25))
+            glow.move(to: NSPoint(x: 12, y: 7.75)); glow.line(to: NSPoint(x: 13, y: 9.25))
+            glow.lineWidth = 1.25; glow.lineCapStyle = .round
+            glow.stroke()
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // The app logo (bundle icon), in colour; outside a bundle fall back to the symbol.
-        if Bundle.main.url(forResource: "AppIcon", withExtension: "icns") != nil,
-           let logo = NSApp.applicationIconImage?.copy() as? NSImage {
-            logo.size = NSSize(width: 18, height: 18)
-            item.button?.image = logo
-        } else {
-            item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "OpenNotch")
-        }
+        item.button?.image = Self.menuBarGlyph()
+        item.button?.image?.accessibilityDescription = "OpenNotch"
 
         let menu = NSMenu()
 
