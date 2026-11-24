@@ -39,6 +39,7 @@ final class AgentUsage: AgentUsageService {
            let saved = try? JSONDecoder().decode(PlanLimits.self, from: data) {
             claudeLimits = saved; publishLimits()
         }
+        fetchClaudeIfDue()  // then replace it with fresh numbers
         let w = AgentWatcher { [weak self] snap in Task { @MainActor in self?.apply(snap) } }
         watcher = w
         Task { await w.start() }
@@ -55,7 +56,7 @@ final class AgentUsage: AgentUsageService {
     func stop(sessionId: String) { send(.stop, sessionId) }
     func redirect(sessionId: String, text: String) { send(.redirect(text), sessionId) }
     func dismiss(sessionId: String) { acknowledge(sessionId) }
-    /// Drops quiet sessions, then (if Connected and ≥ 60 s since the last attempt) refreshes Claude usage.
+    /// Drops quiet sessions, then (if Connected and ≥ 15 s since the last attempt) refreshes Claude usage.
     func refreshLimits() {
         evaluate()
         fetchClaudeIfDue()
@@ -90,7 +91,9 @@ final class AgentUsage: AgentUsageService {
             // Off the main actor: SecItemCopyMatching blocks while the prompt is up.
             let outcome = await Task.detached(priority: .utility) {
                 await ClaudeUsageFlow.run(at: Date(), read: ClaudeUsageClient.readCredential,
-                                          fetch: { await ClaudeUsageClient.fetch(token: $0) })
+                                          fetch: { await ClaudeUsageClient.fetch(token: $0) },
+                                          renew: { await ClaudeUsageClient.renew(refreshToken: $0, scopes: $1) },
+                                          save: ClaudeUsageClient.save)
             }.value
             self?.finishFetch(outcome)
         }

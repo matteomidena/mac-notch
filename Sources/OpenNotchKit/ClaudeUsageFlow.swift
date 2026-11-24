@@ -15,7 +15,7 @@ public enum ClaudeUsageOutcome: Equatable, Sendable {
 
 /// One attempt per window, counted on attempts (not successes) so a 401 is never retried faster.
 public struct ClaudeFetchGate: Sendable {
-    public static let interval: TimeInterval = 60
+    public static let interval: TimeInterval = 15  // every open refetches; this only absorbs hover flicker
     private var last: Date?
     public init() {}
     public mutating func allow(at now: Date) -> Bool {
@@ -26,18 +26,29 @@ public struct ClaudeFetchGate: Sendable {
 }
 
 public enum ClaudeUsageFlow {
-    /// Reads the credential, then fetches once. Any non-200 or missing/expired credential is `.none`: no retry, no refresh.
+    /// Reads the credential, renews it first when expired (saving the renewal back for Claude Code),
+    /// then fetches once. Any failure is `.none`: keep the last snapshot.
     public static func run(
         at now: Date,
         read: @Sendable () -> ClaudeCredentialRead,
-        fetch: @Sendable (_ token: String) async -> (status: Int, body: Data)?
+        fetch: @Sendable (_ token: String) async -> (status: Int, body: Data)?,
+        renew: @Sendable (_ refreshToken: String, _ scopes: [String]) async -> Data? = { _, _ in nil },
+        save: @Sendable (_ keychainJSON: Data) -> Bool = { _ in false }
     ) async -> ClaudeUsageOutcome {
         switch read() {
         case .denied: return .denied
         case .notFound: return .none
         case .data(let json):
-            guard let cred = ClaudeCredential.parse(keychainJSON: json), !cred.isExpired(at: now),
-                  let res = await fetch(cred.accessToken), res.status == 200,
+            guard let cred = ClaudeCredential.parse(keychainJSON: json) else { return .none }
+            var token = cred.accessToken
+            if cred.isExpired(at: now) {
+                // ponytail: no lock shared with Claude Code; a renewal in the same second can log one side out.
+                guard let refresh = cred.refreshToken, let body = await renew(refresh, cred.scopes),
+                      let next = ClaudeCredential.renewed(keychainJSON: json, response: body, at: now) else { return .none }
+                _ = save(next.json)  // the old refresh token is spent either way; use the new one
+                token = next.token
+            }
+            guard let res = await fetch(token), res.status == 200,
                   let limits = ClaudeUsageDecoder.decode(res.body, at: now) else { return .none }
             return .snapshot(limits)
         }

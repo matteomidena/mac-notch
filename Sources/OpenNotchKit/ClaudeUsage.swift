@@ -21,6 +21,8 @@ public enum ClaudeUsageDecoder {
 public struct ClaudeCredential: Equatable, Sendable {
     public let accessToken: String
     public let expiresAt: Date
+    public var refreshToken: String? = nil
+    public var scopes: [String] = []
 
     /// nil when the login is unusable: no token, no expiry, or `loginEnded` set to anything.
     public static func parse(keychainJSON: Data) -> ClaudeCredential? {
@@ -30,7 +32,24 @@ public struct ClaudeCredential: Equatable, Sendable {
               let ms = oauth["expiresAt"] as? Double,
               (oauth["loginEnded"] ?? NSNull()) is NSNull
         else { return nil }
-        return ClaudeCredential(accessToken: token, expiresAt: Date(timeIntervalSince1970: ms / 1000))
+        return ClaudeCredential(accessToken: token, expiresAt: Date(timeIntervalSince1970: ms / 1000),
+                                refreshToken: oauth["refreshToken"] as? String, scopes: oauth["scopes"] as? [String] ?? [])
+    }
+
+    /// The Keychain JSON with a token-endpoint response folded in, the way Claude Code saves a renewal:
+    /// new access token and expiry, new refresh token when one came back, every other field untouched.
+    public static func renewed(keychainJSON: Data, response: Data, at now: Date) -> (json: Data, token: String)? {
+        guard var root = try? JSONSerialization.jsonObject(with: keychainJSON) as? [String: Any],
+              var oauth = root["claudeAiOauth"] as? [String: Any],
+              let res = try? JSONSerialization.jsonObject(with: response) as? [String: Any],
+              let access = res["access_token"] as? String, !access.isEmpty,
+              let expiresIn = (res["expires_in"] as? NSNumber)?.doubleValue else { return nil }
+        oauth["accessToken"] = access
+        oauth["expiresAt"] = Int64((now.timeIntervalSince1970 + expiresIn) * 1000)
+        if let refresh = res["refresh_token"] as? String, !refresh.isEmpty { oauth["refreshToken"] = refresh }
+        root["claudeAiOauth"] = oauth
+        guard let json = try? JSONSerialization.data(withJSONObject: root) else { return nil }
+        return (json, access)
     }
 
     public func isExpired(at now: Date) -> Bool { now >= expiresAt }
