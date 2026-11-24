@@ -21,3 +21,8 @@ import Testing
 @Test func hostConstantIsSemver() {
     #expect(apiCompatibility(host: OPENNOTCH_API_VERSION, plugin: OPENNOTCH_API_VERSION) == .compatible)
 }
+
+@Test func oneOneHostAcceptsOneZeroPlugin() {
+    #expect(apiCompatibility(host: "1.1.0", plugin: "1.0.0") == .compatible)
+    #expect(OPENNOTCH_API_VERSION == "1.1.0")
+}

@@ -5,10 +5,11 @@ import CoreGraphics
 public enum NotchFootprint {
     public static func size(phase: NotchPhase, showAmbient: Bool,
                             notchSize: CGSize, ambientSize: CGSize,
-                            expandedSize: CGSize) -> CGSize {
+                            expandedSize: CGSize, alertSize: CGSize) -> CGSize {
         switch phase {
         case .expanded, .pinned: expandedSize
         case .collapsed: showAmbient ? ambientSize : notchSize
+        case .alert: alertSize
         case .hidden: notchSize   // window is ordered out; keep a sane morph origin
         }
     }

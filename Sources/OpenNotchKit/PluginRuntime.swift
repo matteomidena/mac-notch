@@ -6,6 +6,7 @@ import SwiftUI
     private let enabledStore: PluginStorage?
     private var disabledIds: Set<String>
     public private(set) var widgets: [PluginWidget] = []
+    public private(set) var tabs: [PluginTab] = []
 
     public init(host: PluginHost, plugins: [NotchPlugin], enabledStore: PluginStorage? = nil) {
         self.host = host
@@ -34,7 +35,8 @@ import SwiftUI
     }
 
     public func reload() {
-        widgets = activePlugins.flatMap { $0.widgets() }
+        tabs = activePlugins.compactMap { $0 as? NotchTabProvider }.flatMap { $0.tabs() }
+        widgets = activePlugins.filter { !($0 is NotchTabProvider) }.flatMap { $0.widgets() }
             .enumerated()
             .sorted { (rank($0.element.size), $0.offset) < (rank($1.element.size), $1.offset) }
             .map(\.element)
@@ -46,6 +48,8 @@ import SwiftUI
 
     public var compactLeading: [AnyView] { activePlugins.compactMap { $0.compactLeading() } }
     public var compactTrailing: [AnyView] { activePlugins.compactMap { $0.compactTrailing() } }
+    public var openLeading: [AnyView] { activePlugins.compactMap { $0.openLeading() } }
+    public var openTrailing: [AnyView] { activePlugins.compactMap { $0.openTrailing() } }
     public var quickActions: [QuickAction] { activePlugins.flatMap { $0.quickActions() } }
 
     // MARK: Settings surface

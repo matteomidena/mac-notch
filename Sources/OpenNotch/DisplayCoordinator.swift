@@ -8,12 +8,14 @@ import OpenNotchKit
 final class DisplayCoordinator {
     private let runtime: PluginRuntime
     private let nowPlaying: NowPlayingService
+    private let agents: AgentUsageService
     private var controllers: [NotchController] = []
     private var observer: NSObjectProtocol?
 
-    init(runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+    init(runtime: PluginRuntime, nowPlaying: NowPlayingService, agents: AgentUsageService) {
         self.runtime = runtime
         self.nowPlaying = nowPlaying
+        self.agents = agents
         observer = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main) { [weak self] _ in
@@ -26,7 +28,7 @@ final class DisplayCoordinator {
         controllers.forEach { $0.tearDown() }
         controllers = NSScreen.screens.map { screen in
             let controller = NotchController(screen: screen, runtime: runtime,
-                                             nowPlaying: nowPlaying)
+                                             nowPlaying: nowPlaying, agents: agents)
             controller.show()
             return controller
         }

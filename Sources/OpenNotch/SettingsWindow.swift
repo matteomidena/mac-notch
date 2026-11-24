@@ -7,6 +7,7 @@ import os
 private let log = Logger(subsystem: "cafe.notch", category: "settings")
 
 struct SettingsView: View {
+    let agents: AgentUsage
     let store: LauncherStore
     let installedApps: [InstalledApp]
     let runtime: PluginRuntime
@@ -17,6 +18,7 @@ struct SettingsView: View {
         TabView {
             GeneralTab().tabItem { Label("General", systemImage: "gearshape") }
             ShortcutsTab(store: store, apps: installedApps).tabItem { Label("Shortcuts", systemImage: "bolt") }
+            AgentsTab(agents: agents).tabItem { Label("Agents", systemImage: "sparkles") }
             PluginsTab(runtime: runtime, initialBlocked: blockedIds,
                        onUnblock: onUnblock, onUninstall: onUninstall)
                 .tabItem { Label("Plugins", systemImage: "puzzlepiece.extension") }
@@ -99,6 +101,53 @@ private struct GeneralTab: View {
     }
 }
 
+private struct AgentsTab: View {
+    let agents: AgentUsage
+    @State private var settings = AgentSettings.load(from: Self.storage)
+    @AppStorage(ClaudeUsageClient.connectedKey) private var claudeConnected = false
+    private static let storage = UserDefaultsPluginStorage(pluginId: "cafe.notch.agents")
+
+    var body: some View {
+        Form {
+            Section("Runaway alerts") {
+                Toggle("Alerts", isOn: $settings.alertsEnabled)
+                Stepper(value: $settings.threshold, in: AgentSettings.thresholdRange, step: 0.5) {
+                    Text("Alert threshold: \(settings.threshold, format: .number.precision(.fractionLength(1)))× normal")
+                }
+                Stepper(value: $settings.windowMinutes, in: AgentSettings.windowRange) {
+                    Text("Rate window: \(settings.windowMinutes) min")
+                }
+            }
+            Section("Integrations") {
+                LabeledContent("Claude plan usage") {
+                    HStack {
+                        Text(claudeConnected ? "Connected" : "Not connected").foregroundStyle(.secondary)
+                        Button(claudeConnected ? "Disconnect" : "Connect") {
+                            if claudeConnected { agents.disconnect() } else { agents.connect() }
+                        }
+                    }
+                }
+                LabeledContent("Claude hook") {
+                    HStack {
+                        Text(agents.installer.isInstalled ? "Installed" : "Not installed").foregroundStyle(.secondary)
+                        Button(agents.installer.isInstalled ? "Remove" : "Install") {
+                            if agents.installer.isInstalled { agents.installer.remove() } else { agents.installer.install() }
+                        }
+                    }
+                }
+                if let err = agents.installer.lastError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onChange(of: settings) { _, new in
+            new.save(to: Self.storage)
+            agents.apply(new)
+        }
+    }
+}
+
 private struct ShortcutsTab: View {
     let store: LauncherStore
     let apps: [InstalledApp]
@@ -135,7 +184,7 @@ private struct ShortcutsTab: View {
 
 @MainActor final class SettingsWindowController {
     private var window: NSWindow?
-    func show(store: LauncherStore, installedApps: [InstalledApp],
+    func show(agents: AgentUsage, store: LauncherStore, installedApps: [InstalledApp],
               runtime: PluginRuntime, blockedIds: [String],
               onUnblock: @escaping (String) -> Void,
               onUninstall: @escaping (String) -> Void) {
@@ -145,7 +194,7 @@ private struct ShortcutsTab: View {
             w.title = "OpenNotch Settings"
             w.isReleasedWhenClosed = false
             w.contentView = NSHostingView(rootView: SettingsView(
-                store: store, installedApps: installedApps, runtime: runtime,
+                agents: agents, store: store, installedApps: installedApps, runtime: runtime,
                 blockedIds: blockedIds, onUnblock: onUnblock, onUninstall: onUninstall))
             w.center()
             window = w

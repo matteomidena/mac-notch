@@ -1,10 +1,20 @@
 import AppKit
 import SwiftUI
 import OpenNotchKit
+import os
+
+private let log = Logger(subsystem: "cafe.notch", category: "window")
 
 /// Borderless, non-activating panel pinned over the notch. Static: created once
 /// at full size and never moved or resized — all animation is SwiftUI inside.
 final class NotchWindow: NSPanel {
+    /// Claude's menu-bar template icon from the installed desktop app, read-only; empty if absent.
+    static func claudeMark() -> [AgentKind: Image] {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop"),
+              let img = Bundle(url: url)?.image(forResource: "TrayIconTemplate") else { return [:] }
+        img.isTemplate = true
+        return [.claude: Image(nsImage: img)]
+    }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
@@ -13,9 +23,9 @@ final class NotchWindow: NSPanel {
 final class NotchController: NSObject {
     private let notchWidth: CGFloat = 200
     private let fallbackPillSize = CGSize(width: 180, height: 32)
-    private let expandedSize = CGSize(width: 416, height: 124)
-    /// Fixed panel: expanded size + headroom for spring overshoot.
-    private let panelSize = CGSize(width: 600, height: 184)
+    /// Fixed window: tallest panel (Agents cap) + 8 pt gap + 36 pt pill + spring headroom.
+    private let panelSize = CGSize(width: 520, height: AgentsLayout.maxHeight + NotchViewModel.pillGap + NotchViewModel.pillHeight + 40)
+    private static var loggedAmbient = false
     private let hoverOutGrace: TimeInterval = 0.2
     /// Dwell before opening on hover, so a cursor merely passing over the notch
     /// (e.g. on its way to a menubar item) doesn't fling the panel open.
@@ -30,27 +40,36 @@ final class NotchController: NSObject {
     // bar. Fine for the single media plugin; generalize when a real compact-widget
     // API + multi-plugin composition lands.
     private let nowPlaying: NowPlayingService
+    private let agents: AgentUsageService
     private var stateMachine = NotchStateMachine()
     private var cursorPoll: Timer?
     private var cursorInside = false
     private var pendingHoverOut: DispatchWorkItem?
     private var pendingHoverIn: DispatchWorkItem?
     private var coveredByFullscreen = false
+    /// After a Space switch the notch stays out of the way: hover can't open it
+    /// until this passes, and a cursor already under it must leave and come back.
+    private var settleUntil = Date.distantPast
+    private let spaceSettle: TimeInterval = 0.45
     private var fullscreenPoll: Timer?
     private var localMonitor: Any?
     private var globalMonitor: Any?
 
-    init(screen: NSScreen, runtime: PluginRuntime, nowPlaying: NowPlayingService) {
+    init(screen: NSScreen, runtime: PluginRuntime, nowPlaying: NowPlayingService, agents: AgentUsageService) {
         self.screen = screen
         self.runtime = runtime
         self.nowPlaying = nowPlaying
+        self.agents = agents
         model = NotchViewModel(widgets: runtime.widgets)
         model.compactLeading = runtime.compactLeading.first
         model.compactTrailing = runtime.compactTrailing.first
+        model.openLeading = runtime.openLeading.first
+        model.openTrailing = runtime.openTrailing.first
         model.quickActions = runtime.quickActions
         model.notchGap = notchWidth
+        model.tabs = runtime.tabs
 
-        hostingView = PassthroughHostingView(rootView: NotchShell(model: model))
+        hostingView = PassthroughHostingView(rootView: NotchShell(model: model, agentMarks: NotchWindow.claudeMark()))
         hostingView.autoresizingMask = [.width, .height]
 
         panel = NotchWindow(contentRect: CGRect(origin: .zero, size: panelSize),
@@ -58,7 +77,9 @@ final class NotchController: NSObject {
                             backing: .buffered,
                             defer: false)
         panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // Not .canJoinAllSpaces: a per-Space window slides out with its Space during a switch,
+        // like the real menu bar, instead of staying put. spaceChanged() brings it to the new one.
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -76,7 +97,15 @@ final class NotchController: NSObject {
         if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             model.notchGap = max(80, screen.frame.width - left.width - right.width) + 6
         }
-        model.showAmbient = (nowPlaying.current != nil)
+        model.showAmbient = ambientWanted()
+        model.onSelectTab = { [weak self] in
+            guard let self else { return }
+            self.model.footprint = self.currentFootprint()
+        }
+        if !Self.loggedAmbient {
+            Self.loggedAmbient = true
+            log.info("ambient width \(Double(self.ambientSize().width))")
+        }
 
         panel.setFrame(panelFrame(), display: false)
         hostingView.interactiveRect = { [weak self] in self?.hitRect() ?? .zero }
@@ -113,13 +142,30 @@ final class NotchController: NSObject {
     }
 
     private func ambientSize() -> CGSize {
-        CGSize(width: model.notchGap + 94, height: model.topInset)
+        CGSize(width: model.notchGap + NotchViewModel.wing
+                      + (model.leadingWing ? NotchViewModel.wing : NotchViewModel.bareWing),
+               height: model.topInset)
+    }
+
+    /// Ambient bar shows while media plays or any plan limit exists. A paused or
+    /// ended session (macOS drops its menu bar icon) doesn't count.
+    private func ambientWanted() -> Bool {
+        model.leadingWing = nowPlaying.current?.isPlaying ?? false
+        return model.leadingWing || !agents.limits.isEmpty || agents.liveSessions.contains(where: \.needsYou)
+    }
+
+    private var expandedSize: CGSize {
+        CGSize(width: NotchViewModel.panelWidth,
+               height: NotchViewModel.panelHeight(forTab: model.selectedTab,
+                                                  limitRows: agents.limits.reduce(0) { $0 + $1.windows.count },
+                                                  sessionRows: agents.liveSessions.count))
     }
 
     private func currentFootprint() -> CGSize {
         NotchFootprint.size(phase: stateMachine.phase, showAmbient: model.showAmbient,
                             notchSize: notchSize(), ambientSize: ambientSize(),
-                            expandedSize: expandedSize)
+                            expandedSize: expandedSize,
+                            alertSize: notchSize())  // placeholder: the strip size is wired with the runaway strip
     }
 
     /// The mouse-interactive region. When open, the whole expanded panel (so its
@@ -128,7 +174,9 @@ final class NotchController: NSObject {
     /// notch opens it, but clicks anywhere else fall through to what's behind.
     private func hoverFootprint() -> CGSize {
         switch stateMachine.phase {
-        case .expanded, .pinned: return model.footprint
+        case .expanded, .pinned:   // panel + gap + pill
+            return CGSize(width: model.footprint.width,
+                          height: model.footprint.height + NotchViewModel.pillGap + NotchViewModel.pillHeight)
         default: return notchSize()
         }
     }
@@ -151,7 +199,18 @@ final class NotchController: NSObject {
         let before = stateMachine.phase
         let after = stateMachine.handle(event)
         guard after != before else { return }
+        let isOpen = after == .expanded || after == .pinned
+        if isOpen && !(before == .expanded || before == .pinned) {
+            // Each open starts on the default tab; a click then sticks until close.
+            model.tabs = runtime.tabs
+            model.widgets = runtime.widgets
+            model.quickActions = runtime.quickActions
+            model.selectedTab = TabBar.defaultTab(model.tabItems,
+                                                  hasLiveSession: !agents.liveSessions.isEmpty,
+                                                  isPlaying: nowPlaying.current?.isPlaying ?? false)
+        }
         applyPhase(after)
+        if after == .expanded || after == .pinned { agents.refreshLimits() }  // re-filters stale live sessions
     }
 
     // MARK: - Playback → ambient bar
@@ -159,6 +218,8 @@ final class NotchController: NSObject {
     private func observePlayback() {
         withObservationTracking {
             _ = nowPlaying.current
+            _ = agents.limits
+            _ = agents.liveSessions   // the Agents panel height follows both
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.playbackChanged()
@@ -179,7 +240,7 @@ final class NotchController: NSObject {
     }
 
     private func playbackChanged() {
-        model.showAmbient = (nowPlaying.current != nil)
+        model.showAmbient = ambientWanted()
         model.footprint = currentFootprint()   // SwiftUI animates the morph
     }
 
@@ -211,6 +272,7 @@ final class NotchController: NSObject {
         panel.ignoresMouseEvents = !inside
         guard inside != cursorInside else { return }
         cursorInside = inside
+        if Date() < settleUntil { return }  // settling after a Space switch: track, don't open
         if inside { cursorEntered() } else { cursorExited() }
     }
 
@@ -271,7 +333,7 @@ final class NotchController: NSObject {
         let ws = NSWorkspace.shared.notificationCenter
         // Immediate triggers: space changes (native fullscreen) and frontmost-app
         // changes both warrant instant re-evaluation.
-        ws.addObserver(self, selector: #selector(evaluateFullscreen),
+        ws.addObserver(self, selector: #selector(spaceChanged),
                        name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         ws.addObserver(self, selector: #selector(evaluateFullscreen),
                        name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -297,6 +359,24 @@ final class NotchController: NSObject {
         RunLoop.main.add(poll, forMode: .common)
         fullscreenPoll = poll
         evaluateFullscreen()
+    }
+
+    /// Space switch (swipe, full-screen app): the panel left with the old Space; move it here hidden,
+    /// then fade it in once the switch has settled,
+    /// instead of popping open under a cursor that happens to be at the top.
+    @objc private func spaceChanged() {
+        pendingHoverIn?.cancel(); pendingHoverIn = nil
+        if stateMachine.phase == .expanded { transition(.hoverOut) }
+        settleUntil = Date().addingTimeInterval(spaceSettle)
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()  // .moveToActiveSpace: follow the user into the new Space
+        evaluateFullscreen()
+        DispatchQueue.main.asyncAfter(deadline: .now() + spaceSettle) { [weak self] in
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.3
+                self?.panel.animator().alphaValue = 1
+            }
+        }
     }
 
     @objc private func suspendPoll() { pollSuspended = true }

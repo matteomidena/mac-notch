@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 import OpenNotchKit
 import os
@@ -23,9 +24,11 @@ private extension NSImage {
 final class AppHost: PluginHost {
     let bridge: MediaRemoteBridge
     var nowPlaying: NowPlayingService { bridge }
+    let agents: AgentUsageService
 
-    init(bridge: MediaRemoteBridge) {
+    init(bridge: MediaRemoteBridge, agents: AgentUsageService) {
         self.bridge = bridge
+        self.agents = agents
     }
 
     func launchApp(bundleIdentifier: String) {
@@ -82,27 +85,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launcherStore = LauncherStore(
         storage: UserDefaultsPluginStorage(pluginId: "cafe.notch.launcher"))
     private let settings = SettingsWindowController()
+    private var agentUsage: AgentUsage?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let paths = AdapterPaths.resolve(
             bundleResourceURL: Bundle.main.resourceURL,
             cwd: FileManager.default.currentDirectoryPath,
             fileExists: { FileManager.default.fileExists(atPath: $0) })
+        CTFontManagerRegisterFontsForURL(URL(fileURLWithPath: paths.interFont) as CFURL, .process, nil)
         let bridge = MediaRemoteBridge(script: paths.script, framework: paths.framework)
         bridge.start()
 
-        let host = AppHost(bridge: bridge)
+        let agents = AgentUsage()
+        agents.start()
+        agents.apply(AgentSettings.load(from: UserDefaultsPluginStorage(pluginId: "cafe.notch.agents")))
+        agentUsage = agents
+        let host = AppHost(bridge: bridge, agents: agents)
         if launcherStore.bundleIds.isEmpty {
             launcherStore.add("com.apple.Safari")
             launcherStore.add("com.apple.iCal")     // Calendar
         }
         let runtime = PluginRuntime(host: host, plugins: [
+            AgentsPlugin(host: host),
             MediaPlugin(host: host),
             AppLauncherPlugin(host: host, store: launcherStore),
         ])
         self.host = host
         self.runtime = runtime
-        self.displays = DisplayCoordinator(runtime: runtime, nowPlaying: host.nowPlaying)
+        self.displays = DisplayCoordinator(runtime: runtime, nowPlaying: host.nowPlaying, agents: host.agents)
 
         let blocklist = PluginBlocklist(store: DefaultsMarkerStore())
         self.blocklist = blocklist
@@ -143,9 +153,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The logo as a template glyph (a screen with its notch and the glow under it), so macOS tints it
+    /// like the other menu bar icons.
+    static func menuBarGlyph() -> NSImage {
+        let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+            NSColor.black.set()
+            let screen = NSBezierPath(roundedRect: NSRect(x: 1.75, y: 3.25, width: 14.5, height: 11.5), xRadius: 3, yRadius: 3)
+            screen.lineWidth = 1.5
+            screen.stroke()
+            NSBezierPath(roundedRect: NSRect(x: 5.5, y: 3, width: 7, height: 3.5), xRadius: 1.5, yRadius: 1.5).fill()
+            let glow = NSBezierPath()  // three rays of light under the notch
+            glow.move(to: NSPoint(x: 9, y: 8.25)); glow.line(to: NSPoint(x: 9, y: 10.25))
+            glow.move(to: NSPoint(x: 6, y: 7.75)); glow.line(to: NSPoint(x: 5, y: 9.25))
+            glow.move(to: NSPoint(x: 12, y: 7.75)); glow.line(to: NSPoint(x: 13, y: 9.25))
+            glow.lineWidth = 1.25; glow.lineCapStyle = .round
+            glow.stroke()
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "OpenNotch")
+        item.button?.image = Self.menuBarGlyph()
+        item.button?.image?.accessibilityDescription = "OpenNotch"
 
         let menu = NSMenu()
 
@@ -162,8 +194,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         host?.invalidateAppCache()
-        guard let runtime else { return }
+        guard let runtime, let agentUsage else { return }
         settings.show(
+            agents: agentUsage,
             store: launcherStore,
             installedApps: host?.installedApps() ?? [],
             runtime: runtime,

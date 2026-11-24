@@ -74,6 +74,12 @@ public struct InstalledApp: Identifiable, Equatable, Sendable {
     func play(); func pause(); func toggle()
     func next(); func previous()
     func seek(to time: TimeInterval)
+    // Added in 1.1.
+    func toggleShuffle()
+}
+
+public extension NowPlayingService {
+    func toggleShuffle() {}
 }
 
 @MainActor public protocol PluginHost: AnyObject {
@@ -81,9 +87,12 @@ public struct InstalledApp: Identifiable, Equatable, Sendable {
     func launchApp(bundleIdentifier: String)
     func installedApps() -> [InstalledApp]
     func storage(for pluginId: String) -> PluginStorage
+    // Added in 1.1 — appended last so 1.0 witness-table offsets are unchanged.
+    var agents: AgentUsageService { get }
 }
 
 public extension PluginHost {
+    var agents: AgentUsageService { NoAgents.shared }
     func storage(for pluginId: String) -> PluginStorage {
         UserDefaultsPluginStorage(pluginId: pluginId)
     }
@@ -97,6 +106,9 @@ public extension PluginHost {
     // physical notch (leading = left of notch, trailing = right). Default nil.
     func compactLeading() -> AnyView?
     func compactTrailing() -> AnyView?
+    // Optional views in the open panel's top strip, beside the camera. Default nil.
+    func openLeading() -> AnyView?
+    func openTrailing() -> AnyView?
     func quickActions() -> [QuickAction]
     // Optional settings pane shown under Settings → Plugins. Default nil.
     func settingsPane() -> AnyView?
@@ -105,6 +117,8 @@ public extension PluginHost {
 public extension NotchPlugin {
     func compactLeading() -> AnyView? { nil }
     func compactTrailing() -> AnyView? { nil }
+    func openLeading() -> AnyView? { nil }
+    func openTrailing() -> AnyView? { nil }
     func quickActions() -> [QuickAction] { [] }
     func settingsPane() -> AnyView? { nil }
 }

@@ -61,3 +61,37 @@ import Testing
     #expect(sm.handle(.enterFullscreen) == .hidden)
     #expect(sm.handle(.exitFullscreen) == .collapsed)
 }
+
+@Test func alertRaisedOnlyFromCollapsed() {
+    #expect(NotchStateMachine(phase: .collapsed).handleCopy(.alertRaised) == .alert)
+    for phase in [NotchPhase.expanded, .pinned, .hidden, .alert] {
+        #expect(NotchStateMachine(phase: phase).handleCopy(.alertRaised) == phase)
+    }
+}
+
+@Test func alertOwnsHoverAndClicks() {
+    for event in [NotchEvent.hoverIn, .hoverOut, .click, .clickOutside, .dragIn, .dragOut] {
+        #expect(NotchStateMachine(phase: .alert).handleCopy(event) == .alert)
+    }
+}
+
+@Test func alertClosesToCollapsed() {
+    for event in [NotchEvent.alertFolded, .alertClosed, .escape, .exitFullscreen] {
+        #expect(NotchStateMachine(phase: .alert).handleCopy(event) == .collapsed)
+    }
+    #expect(NotchStateMachine(phase: .alert).handleCopy(.enterFullscreen) == .hidden)
+}
+
+@Test func alertFoldedAndClosedIgnoredOutsideAlert() {
+    for phase in [NotchPhase.collapsed, .pinned] {
+        #expect(NotchStateMachine(phase: phase).handleCopy(.alertFolded) == phase)
+        #expect(NotchStateMachine(phase: phase).handleCopy(.alertClosed) == phase)
+    }
+}
+
+private extension NotchStateMachine {
+    func handleCopy(_ event: NotchEvent) -> NotchPhase {
+        var sm = self
+        return sm.handle(event)
+    }
+}
