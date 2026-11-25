@@ -17,7 +17,7 @@ import SwiftUI
 }
 
 @MainActor @Observable final class CalendarStore {
-    private let ek = EKEventStore()
+    @ObservationIgnored private var ek = EKEventStore()
     private(set) var status = EKEventStore.authorizationStatus(for: .event)
     private(set) var events: [EKEvent] = []
     private var day = Calendar.current.startOfDay(for: .now)
@@ -33,7 +33,10 @@ import SwiftUI
     var hasAccess: Bool { status == .fullAccess }
 
     func requestAccess() async {
-        _ = try? await ek.requestFullAccessToEvents()
+        // A fresh store: handing the main actor's own one to the nonisolated request is a data race
+        // under Swift 6. Access is per app, and a store made after the grant reads with it.
+        _ = try? await EKEventStore().requestFullAccessToEvents()
+        ek = EKEventStore()
         reload()
     }
 
