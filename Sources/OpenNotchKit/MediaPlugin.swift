@@ -42,6 +42,8 @@ struct Marquee: View {
     var gap: CGFloat = 28
     @State private var textWidth: CGFloat = 0
     @State private var boxWidth: CGFloat = 0
+    @Environment(\.batterySaver) private var saver
+    @Environment(\.pauseAmbientMotion) private var paused
 
     var body: some View {
         let label = Text(text).lineLimit(1).fixedSize()
@@ -49,7 +51,7 @@ struct Marquee: View {
             .onGeometryChange(for: CGFloat.self, of: \.size.width) { boxWidth = $0 }
             .overlay(alignment: .leading) {
                 if textWidth > boxWidth {
-                    TimelineView(.animation) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / (saver ? 15 : 30), paused: paused)) { ctx in
                         let cycle = Double(textWidth + gap)
                         let x = CGFloat((ctx.date.timeIntervalSinceReferenceDate * speed).truncatingRemainder(dividingBy: cycle))
                         HStack(spacing: gap) { label; label }.offset(x: -x)

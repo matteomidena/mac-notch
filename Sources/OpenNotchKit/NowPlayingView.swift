@@ -38,6 +38,7 @@ public struct EqualizerBars: View {
     private let isPlaying: Bool
     private let barHeight: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pauseAmbientMotion) private var paused
     public init(isPlaying: Bool, barHeight: CGFloat = 18) {
         self.isPlaying = isPlaying
         self.barHeight = barHeight
@@ -49,7 +50,7 @@ public struct EqualizerBars: View {
     }
     public var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20.0,
-                                paused: !isPlaying || reduceMotion)) { timeline in
+                                paused: !isPlaying || reduceMotion || paused)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             HStack(alignment: .center, spacing: 2) {
                 ForEach(0..<3, id: \.self) { i in

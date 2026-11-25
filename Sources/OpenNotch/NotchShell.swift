@@ -56,10 +56,10 @@ struct NotchPanelShape: Shape {
     @ObservationIgnored var openTrailing: AnyView?
     init(widgets: [PluginWidget]) { self.widgets = widgets }
 
-    /// Island feel (spec M2.0): bouncy open, snappy close. Tuning knobs.
+    /// Island feel: a light bounce opening, no wobble closing (boring.notch's values). Tuning knobs.
     var spring: Animation {
-        isOpen ? .spring(response: 0.4, dampingFraction: 0.7)
-               : .spring(response: 0.3, dampingFraction: 0.85)
+        isOpen ? .spring(response: 0.42, dampingFraction: 0.8)
+               : .spring(response: 0.45, dampingFraction: 1.0)
     }
     var isOpen: Bool { phase == .expanded || phase == .pinned }
 
@@ -74,7 +74,11 @@ struct NotchPanelShape: Shape {
     static let pillHeight: CGFloat = 36
     static let pillGap: CGFloat = 8
     static func panelHeight(forTab id: String?, limitRows: Int = 0, sessionRows: Int = 0) -> CGFloat {
-        id == "agents" ? AgentsLayout.panelHeight(limitRows: limitRows, sessionRows: sessionRows) : 150
+        switch id {
+        case "agents": AgentsLayout.panelHeight(limitRows: limitRows, sessionRows: sessionRows)
+        case "calendar": 250  // header + day strip + about four events
+        default: 150
+        }
     }
 }
 
@@ -126,18 +130,22 @@ private struct QuickActionsGrid: View {
 /// Floating tab pill under the panel: the active tab shows icon + title, the rest icon only.
 private struct TabPill: View {
     let model: NotchViewModel
+    @Namespace private var pill
     var body: some View {
         HStack(spacing: 4) {
             ForEach(model.tabItems, id: \.id) { item in
                 let active = item.id == model.selectedTab
-                Button { model.select(item.id) } label: {
+                Button { withAnimation(.snappy(duration: 0.3)) { model.select(item.id) } } label: {
                     HStack(spacing: 6) {
                         Image(systemName: item.systemImage).font(.system(size: 13))
                         if active { Text(item.title).font(Hex.text(12, weight: .medium)).lineLimit(1) }
                     }
                     .foregroundStyle(active ? Hex.ink : Hex.muted)
                     .padding(.horizontal, 12).frame(height: NotchViewModel.pillHeight - 8)
-                    .background(active ? Hex.line(0.14) : .clear, in: Capsule())
+                    .background {
+                        // One capsule that slides to the active tab.
+                        if active { Capsule().fill(Hex.line(0.14)).matchedGeometryEffect(id: "active", in: pill) }
+                    }
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -170,11 +178,16 @@ struct NotchShell: View {
                     .transition(.notchContent)
             }
         }
+        .sensoryFeedback(.alignment, trigger: model.isOpen) { _, open in open }
         // One spring drives shape + content together — a single morphing blob.
         .animation(model.spring, value: model.footprint)
         .animation(model.spring, value: model.phase)
+        // Outside the springs: the shadow goes the moment the notch closes, never trailing the shrinking blob.
+        .shadow(color: .black.opacity(model.isOpen ? 0.7 : 0), radius: 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.agentMarkImages, agentMarks)
+        .environment(\.batterySaver, PowerMonitor.shared.active)
+        .environment(\.pauseAmbientMotion, PowerMonitor.shared.active && !model.isOpen)
     }
 
     @ViewBuilder private var content: some View {
@@ -189,6 +202,8 @@ struct NotchShell: View {
                 .padding(.horizontal, 18)
                 .frame(height: model.topInset)
                 tabContent
+                    .id(model.selectedTab)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
                     .padding(.horizontal, 16).padding(.bottom, 10).padding(.top, 4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
