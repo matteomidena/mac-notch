@@ -33,6 +33,25 @@ enum AgentRoots {
         }
     }
 
+    /// Reads `path` from `offset` in 4 MB chunks, handing each chunk's complete lines to `body`;
+    /// nothing outlives a chunk. Returns the new offset.
+    @discardableResult
+    static func stream(_ path: String, from offset: UInt64 = 0, splitter: inout LineSplitter,
+                       keep: (Data.SubSequence) -> Bool = { _ in true }, _ body: ([String]) -> Void) -> UInt64 {
+        guard let fh = FileHandle(forReadingAtPath: path), (try? fh.seek(toOffset: offset)) != nil else { return offset }
+        defer { try? fh.close() }
+        var offset = offset
+        // The pool must wrap the read: FileHandle hands back autoreleased buffers, and a
+        // background task has no run loop to drain them (4 GB of chunks piled up without it).
+        while autoreleasepool(invoking: {
+            guard let chunk = try? fh.read(upToCount: 4 << 20), !chunk.isEmpty else { return false }
+            offset += UInt64(chunk.count)
+            body(splitter.feed(chunk, keep: keep))
+            return true
+        }) {}
+        return offset
+    }
+
     /// Limits from the newest Codex log that reports them, for a launch after Codex went quiet.
     static func newestCodexLimits() -> PlanLimits? {
         guard let walker = FileManager.default.enumerator(
@@ -41,14 +60,24 @@ enum AgentRoots {
             ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
         }
         for (url, _) in dated.sorted(by: { $0.1 > $1.1 }).prefix(5) {
-            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
-            var splitter = LineSplitter()
-            if let l = splitter.feed(data).reversed().lazy.compactMap({ CodexLogParser.parse($0)?.limits }).first { return l }
+            var splitter = LineSplitter(), found: PlanLimits?
+            stream(url.path, splitter: &splitter, keep: { $0.firstRange(of: needle.rateLimits) != nil }) { lines in
+                if let l = lines.reversed().lazy.compactMap({ CodexLogParser.parse($0)?.limits }).first { found = l }
+            }
+            if let found { return found }
         }
         return nil
     }
 
     /// `*.jsonl` files under the existing roots modified at or after `since`.
+    /// Byte patterns for skipping lines before decoding them.
+    enum needle {
+        static let usage = Data(#""usage""#.utf8)                  // Claude assistant line with tokens
+        static let tokenCount = Data(#""token_count""#.utf8)       // Codex tokens (and rate limits)
+        static let sessionMeta = Data(#""session_meta""#.utf8)     // Codex thread id: the session key
+        static let rateLimits = Data(#""rate_limits""#.utf8)
+    }
+
     static func files(since: Date) -> [String] {
         var out: [String] = []
         for root in existing {
@@ -98,22 +127,18 @@ actor AgentWatcher {
     }
 
     private func read(_ path: String) {
-        guard let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? UInt64,
-              let fh = FileHandle(forReadingAtPath: path) else { return }
-        defer { try? fh.close() }
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? UInt64 else { return }
         var offset = offsets[path] ?? 0
         if size < offset {  // truncated or replaced
             offset = 0
             splitters[path] = LineSplitter()
         }
-        guard size > offset, (try? fh.seek(toOffset: offset)) != nil else { return }
+        guard size > offset else { return }
         var splitter = splitters[path] ?? LineSplitter()
-        while let chunk = try? fh.read(upToCount: 4 << 20), !chunk.isEmpty {
-            offset += UInt64(chunk.count)
-            AgentRoots.ingest(splitter.feed(chunk), path: path, into: sessions)
+        offsets[path] = AgentRoots.stream(path, from: offset, splitter: &splitter) {
+            AgentRoots.ingest($0, path: path, into: sessions)
         }
         splitters[path] = splitter
-        offsets[path] = offset
     }
 
     // MARK: FSEvents
@@ -143,15 +168,32 @@ actor AgentWatcher {
 }
 
 /// Reads 30 days of logs into a throwaway `AgentSessions` and returns the per-agent normal rate. Never touches live state.
+/// The result is saved: a launch reuses it until it is a day old instead of re-reading gigabytes of logs.
 enum AgentBaseline {
+    private static let key = "agentBaseline", atKey = "agentBaselineAt"
+    static let maxAge: TimeInterval = 86_400
+
+    /// The saved rates and their age, if any.
+    static func saved() -> (rates: [AgentKind: Double], age: TimeInterval)? {
+        let d = UserDefaults.standard
+        guard let raw = d.dictionary(forKey: key) as? [String: Double], let at = d.object(forKey: atKey) as? Date else { return nil }
+        let rates = Dictionary(uniqueKeysWithValues: raw.compactMap { k, v in AgentKind(rawValue: k).map { ($0, v) } })
+        return (rates, Date().timeIntervalSince(at))
+    }
+
     static func compute() -> [AgentKind: Double] {
         let began = Date()
         let files = AgentRoots.files(since: began.addingTimeInterval(-30 * 86_400))
         let local = AgentSessions()
         for path in files {
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe) else { continue }
+            let codex = AgentRoots.agent(of: path) == .codex
             var splitter = LineSplitter()
-            AgentRoots.ingest(splitter.feed(data), path: path, into: local)
+            // Only token lines (and Codex's session key) move the baseline; the rest is skipped undecoded.
+            AgentRoots.stream(path, splitter: &splitter, keep: { line in
+                codex ? line.firstRange(of: AgentRoots.needle.tokenCount) != nil
+                        || line.firstRange(of: AgentRoots.needle.sessionMeta) != nil
+                      : line.firstRange(of: AgentRoots.needle.usage) != nil
+            }) { AgentRoots.ingest($0, path: path, into: local) }
         }
         var averages: [AgentKind: [Double]] = [:]
         for s in local.sessions.values {
@@ -160,6 +202,8 @@ enum AgentBaseline {
         }
         let normal = Dictionary(uniqueKeysWithValues: AgentKind.allCases.map {
             ($0, Baseline.normal(averages: averages[$0] ?? [], agent: $0)) })
+        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: normal.map { ($0.key.rawValue, $0.value) }), forKey: key)
+        UserDefaults.standard.set(Date(), forKey: atKey)
         log.info("baseline: \(files.count) files, \(local.sessions.count) sessions, \(Date().timeIntervalSince(began), format: .fixed(precision: 2)) s")
         return normal
     }

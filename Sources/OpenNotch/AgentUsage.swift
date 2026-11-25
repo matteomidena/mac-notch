@@ -45,10 +45,17 @@ final class AgentUsage: AgentUsageService {
         Task { await w.start() }
         baselineTimer = Task { [weak self] in
             while !Task.isCancelled {
-                let normal = await Task.detached(priority: .utility) { AgentBaseline.compute() }.value
-                self?.normalRate = normal
+                let wait: TimeInterval
+                if let saved = AgentBaseline.saved(), saved.age < AgentBaseline.maxAge {
+                    self?.normalRate = saved.rates
+                    wait = AgentBaseline.maxAge - saved.age
+                } else {
+                    try? await Task.sleep(for: .seconds(30))  // out of the way of launch
+                    self?.normalRate = await Task.detached(priority: .background) { AgentBaseline.compute() }.value
+                    wait = AgentBaseline.maxAge
+                }
                 self?.evaluate()
-                try? await Task.sleep(for: .seconds(24 * 3600))
+                try? await Task.sleep(for: .seconds(wait))
             }
         }
     }
