@@ -16,6 +16,9 @@ public struct ParsedLogLine: Equatable, Sendable {
     public var state: SessionState?  // what this line says the session is doing now
     public var detail: String?       // e.g. "Editing Foo.swift", "npm test"
     public var title: String?        // Claude session name (custom-title / agent-name)
+    public var turnEnded = false     // the agent stopped and handed the turn back
+    public var backgroundStarted: String?   // id of a task launched in the background
+    public var backgroundEnded: [String] = []
 
     public init(at: Date? = nil, tokens: TokenReport? = nil, cwd: String? = nil, userPrompt: String? = nil,
                 threadId: String? = nil, parentThreadId: String? = nil, limits: PlanLimits? = nil,
@@ -59,13 +62,21 @@ public enum ClaudeLogParser {
         if type == "assistant", let blocks = message?["content"] as? [[String: Any]] {
             if let tool = blocks.last(where: { $0["type"] as? String == "tool_use" }) {
                 let name = tool["name"] as? String ?? ""
+                let input = tool["input"] as? [String: Any] ?? [:]
                 if ClaudeLogParser.asksUser.contains(name) {
                     out.state = .needsYou; out.detail = name == "ExitPlanMode" ? "Plan ready" : "Asking a question"
+                } else if name == "mcp__ccd_turn__wrap_up", let ask = input["ask"] as? String, !ask.isEmpty {
+                    out.state = .needsYou; out.detail = ask  // the desktop app's next-step question
                 } else {
-                    out.state = .working; out.detail = toolDetail(name, tool["input"] as? [String: Any] ?? [:])
+                    if name == "KillShell" || name == "TaskStop",
+                       let id = (input["shell_id"] ?? input["task_id"]) as? String { out.backgroundEnded = [id] }
+                    out.state = .working; out.detail = toolDetail(name, input)
                 }
             } else if message?["stop_reason"] as? String == "end_turn" {
-                out.state = .needsYou
+                // A finished turn waits on you only if it ends on a question; otherwise it's done.
+                let text = blocks.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
+                out.turnEnded = true
+                out.state = endsWithQuestion(text) ? .needsYou : .idle
             } else {
                 out.state = .working
             }
@@ -79,12 +90,34 @@ public enum ClaudeLogParser {
                 out.userPrompt = texts.isEmpty ? nil : texts.joined(separator: "\n")
             }
         }
+        if type == "user", let blocks = message?["content"] as? [[String: Any]] {
+            for b in blocks where b["type"] as? String == "tool_result" {
+                let text = (b["content"] as? String)
+                    ?? (b["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
+                if let r = text.range(of: #"running in background with ID: (\w+)"#, options: .regularExpression) {
+                    out.backgroundStarted = String(text[r].split(separator: " ").last ?? "")
+                }
+            }
+        }
+        // A background task's completion notice, queued for the agent or delivered as a prompt.
+        if let raw = (obj["content"] as? String) ?? out.userPrompt, raw.contains("<task-id>") {
+            out.backgroundEnded += taskIds(raw)
+        }
         if type == "user", obj["isMeta"] as? Bool != true, message != nil {
             let interrupted = out.userPrompt?.hasPrefix("[Request interrupted") ?? false
-            out.state = interrupted ? .needsYou : .working
+            // You interrupted it, so you're already there: nothing waits on you.
+            out.state = interrupted ? .idle : .working
             if out.userPrompt != nil && !interrupted { out.detail = "Thinking" }
         }
         return out
+    }
+
+    static func endsWithQuestion(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?")
+    }
+
+    static func taskIds(_ s: String) -> [String] {
+        s.components(separatedBy: "<task-id>").dropFirst().compactMap { $0.components(separatedBy: "</task-id>").first }
     }
 
     /// Tools that stop the turn until the user answers.

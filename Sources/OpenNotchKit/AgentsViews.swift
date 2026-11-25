@@ -3,61 +3,90 @@ import SwiftUI
 private let fill = Hex.ink.opacity(0.024)
 
 /// Closed-notch figure. Priority: runaway badge, then how many sessions wait on you,
-/// else the weekly Claude / Codex usage, alternating every 4 s.
+/// else the weekly Claude / Codex usage, alternating every 4 s. While sessions wait,
+/// the usage still cuts in: after 10 s of the badge, each agent's weekly figure for 3 s.
 struct AgentsFigure: View {
     let service: AgentUsageService
+    static let badgeTime: TimeInterval = 10, usageTime: TimeInterval = 3
+
     var body: some View {
         let waiting = service.liveSessions.filter(\.needsYou).count
+        let weekly = weeklyLimits(service.limits)
         if let alert = service.alert {
             Text(multipleText(alert.multiple))
                 .font(Hex.mono(12)).foregroundStyle(Hex.bg)
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(Hex.ink, in: RoundedRectangle(cornerRadius: 5.6))
         } else if waiting > 0 {
-            HStack(spacing: 5) {
-                PulseDot(color: Hex.attention)
-                Text("\(waiting)").font(Hex.mono(13).weight(.semibold)).foregroundStyle(Hex.attention)
-            }
-            .transition(.opacity)
-        } else {
-            let weekly = weeklyLimits(service.limits)
-            if !weekly.isEmpty {
-                TimelineView(.periodic(from: .now, by: 4)) { ctx in
-                    let (agent, w) = weekly[Int(ctx.date.timeIntervalSince1970 / 4) % weekly.count]
-                    let pct = w.percent(at: ctx.date)
-                    HStack(spacing: 5) {
-                        if service.liveSessions.contains(where: { $0.isLive(at: ctx.date) }) {
-                            PulseDot(color: Hex.running, size: 5)
-                        }
-                        AgentMark(agent: agent, size: 12)
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text("\(Int(pct.rounded()))%").font(Hex.mono(12)).foregroundStyle(Hex.ink)
-                            Capsule().fill(Hex.line(0.10)).frame(width: 24, height: 1.5)
-                                .overlay(alignment: .leading) {
-                                    Capsule().fill(Hex.ink).frame(width: 24 * min(max(pct, 0), 100) / 100, height: 1.5)
-                                }
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                let shown = Self.usageSlot(at: ctx.date.timeIntervalSince1970, agents: weekly.count).map { weekly[$0] }
+                Group {
+                    if let (agent, w) = shown {
+                        usage(agent, w, at: ctx.date, dot: false)
+                    } else {
+                        HStack(spacing: 5) {
+                            PulseDot(color: Hex.attention)
+                            Text("\(waiting)").font(Hex.mono(13).weight(.semibold)).foregroundStyle(Hex.attention)
                         }
                     }
+                }
+                .id(shown?.0)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.35), value: shown?.0)
+            }
+            .transition(.opacity)
+        } else if !weekly.isEmpty {
+            TimelineView(.periodic(from: .now, by: 4)) { ctx in
+                let (agent, w) = weekly[Int(ctx.date.timeIntervalSince1970 / 4) % weekly.count]
+                usage(agent, w, at: ctx.date, dot: true)
                     .id(agent)
                     .transition(.opacity)
                     .animation(.easeInOut(duration: 0.35), value: agent)
-                }
+            }
+        }
+    }
+
+    /// Which agent's usage shows at `time` while sessions wait, or nil for the badge.
+    /// The cycle is 10 s of badge, then 3 s per agent.
+    static func usageSlot(at time: TimeInterval, agents: Int) -> Int? {
+        guard agents > 0 else { return nil }
+        let t = time.truncatingRemainder(dividingBy: badgeTime + usageTime * Double(agents)) - badgeTime
+        return t < 0 ? nil : min(Int(t / usageTime), agents - 1)
+    }
+
+    private func usage(_ agent: AgentKind, _ w: LimitWindow, at date: Date, dot: Bool) -> some View {
+        let pct = w.percent(at: date)
+        return HStack(spacing: 5) {
+            if dot, service.liveSessions.contains(where: { $0.isLive(at: date) }) {
+                PulseDot(color: Hex.running, size: 5)
+            }
+            // Color says which agent: the logo was too small to read here.
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("\(Int(pct.rounded()))%").font(Hex.mono(12)).foregroundStyle(agent.tint)
+                Capsule().fill(Hex.line(0.10)).frame(width: 24, height: 1.5)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(agent.tint).frame(width: 24 * min(max(pct, 0), 100) / 100, height: 1.5)
+                    }
             }
         }
     }
 }
 
 /// Breathing status dot: amber while sessions wait on you, green while agents work.
+/// 15 fps: a repeatForever animation ran at the display's full rate (up to 120 Hz) for as long as a session lived.
 struct PulseDot: View {
     let color: Color
     var size: CGFloat = 7
-    @State private var on = false
+    @Environment(\.pauseAmbientMotion) private var paused
     var body: some View {
-        Circle().fill(color).frame(width: size, height: size)
-            .shadow(color: color.opacity(on ? 0.9 : 0.2), radius: on ? 4 : 1)
-            .opacity(on ? 1 : 0.45)
-            .scaleEffect(on ? 1 : 0.8)
-            .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { on = true } }
+        TimelineView(.animation(minimumInterval: 1.0 / 15, paused: paused)) { ctx in
+            // 0…1…0 every 1.8 s, eased like the old easeInOut.
+            let on = (1 - cos(ctx.date.timeIntervalSinceReferenceDate * .pi / 0.9)) / 2
+            Circle().fill(color).frame(width: size, height: size)
+                .shadow(color: color.opacity(0.2 + 0.7 * on), radius: 1 + 3 * on)
+                .opacity(0.45 + 0.55 * on)
+                .scaleEffect(0.8 + 0.2 * on)
+        }
     }
 }
 
@@ -76,14 +105,21 @@ func elapsedText(_ seconds: TimeInterval) -> String {
     return "\(s / 3600)h \(s % 3600 / 60)m"
 }
 
+extension AgentKind {
+    /// Brand color: Claude orange, Codex blue.
+    var tint: Color {
+        self == .claude ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
+                        : Color(red: 0x3D / 255, green: 0x5A / 255, blue: 0xFE / 255)
+    }
+}
+
 /// Rounded app tile with the agent's mark, like a dock icon.
 struct AgentTile: View {
     let agent: AgentKind
     var size: CGFloat = 28
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.25)
-            .fill(agent == .claude ? Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
-                                   : Color(red: 0x3D / 255, green: 0x5A / 255, blue: 0xFE / 255))
+            .fill(agent.tint)
             .frame(width: size, height: size)
             .overlay { AgentMark(agent: agent, size: size * 0.6) }
     }

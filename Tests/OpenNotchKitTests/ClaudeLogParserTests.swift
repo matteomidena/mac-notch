@@ -66,3 +66,10 @@ private func fixtureLines() throws -> [String] {
     #expect(s.feed(Data(bytes[0..<1])) == [])
     #expect(s.feed(Data(bytes[1...])) == ["é"])
 }
+
+@Test func splitterSkipsLinesThatFailKeep() {
+    var s = LineSplitter()
+    let keepUsage: (Data.SubSequence) -> Bool = { $0.firstRange(of: Data("usage".utf8)) != nil }
+    #expect(s.feed(Data("a\n{\"usage\":1}\nb".utf8), keep: keepUsage) == ["{\"usage\":1}"])
+    #expect(s.feed(Data(" usage\n".utf8), keep: keepUsage) == ["b usage"])  // fragment carried over, then judged whole
+}

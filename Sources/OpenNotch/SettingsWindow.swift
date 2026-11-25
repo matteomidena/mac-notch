@@ -84,8 +84,14 @@ private struct SettingsDisclosure: View {
 
 private struct GeneralTab: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @AppStorage(BatterySaverMode.key) private var batterySaver = BatterySaverMode.automatic
     var body: some View {
         Form {
+            Picker("Battery saver", selection: $batterySaver) {
+                ForEach(BatterySaverMode.allCases, id: \.self) { Text($0.title) }
+            }
+            Text("Lower frame rates, and the closed notch holds still. Automatic also follows macOS Low Power Mode.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Launch at Login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, on in
                     do {

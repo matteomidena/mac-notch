@@ -5,8 +5,8 @@ import os
 
 private let log = Logger(subsystem: "cafe.notch", category: "window")
 
-/// Borderless, non-activating panel pinned over the notch. Static: created once
-/// at full size and never moved or resized — all animation is SwiftUI inside.
+/// Borderless, non-activating panel pinned over the notch. All animation is SwiftUI inside;
+/// the window only switches between two top-anchored sizes (see `fitWindow`).
 final class NotchWindow: NSPanel {
     /// Claude's menu-bar template icon from the installed desktop app, read-only; empty if absent.
     static func claudeMark() -> [AgentKind: Image] {
@@ -25,6 +25,12 @@ final class NotchController: NSObject {
     private let fallbackPillSize = CGSize(width: 180, height: 32)
     /// Fixed window: tallest panel (Agents cap) + 8 pt gap + 36 pt pill + spring headroom.
     private let panelSize = CGSize(width: 520, height: AgentsLayout.maxHeight + NotchViewModel.pillGap + NotchViewModel.pillHeight + 40)
+    /// While collapsed the window hugs the bar: WindowServer composites the whole window on
+    /// every animated frame (bars, pulse dot), so a short window costs far less.
+    private var collapsedSize: CGSize { CGSize(width: panelSize.width, height: max(notchSize().height, model.topInset) + 12) }
+    /// Shrinking waits for the close spring to settle, or it would clip the panel mid-flight.
+    private let shrinkDelay: TimeInterval = 0.8
+    private var pendingShrink: DispatchWorkItem?
     private static var loggedAmbient = false
     private let hoverOutGrace: TimeInterval = 0.2
     /// Dwell before opening on hover, so a cursor merely passing over the notch
@@ -53,6 +59,7 @@ final class NotchController: NSObject {
     private let spaceSettle: TimeInterval = 0.45
     private var fullscreenPoll: Timer?
     private var localMonitor: Any?
+    private var moveMonitors: [Any] = []
     private var globalMonitor: Any?
 
     init(screen: NSScreen, runtime: PluginRuntime, nowPlaying: NowPlayingService, agents: AgentUsageService) {
@@ -107,7 +114,7 @@ final class NotchController: NSObject {
             log.info("ambient width \(Double(self.ambientSize().width))")
         }
 
-        panel.setFrame(panelFrame(), display: false)
+        panel.setFrame(panelFrame(collapsedSize), display: false)
         hostingView.interactiveRect = { [weak self] in self?.hitRect() ?? .zero }
         hostingView.onDragChange = { [weak self] inside in
             self?.transition(inside ? .dragIn : .dragOut)
@@ -126,11 +133,26 @@ final class NotchController: NSObject {
 
     // MARK: - Geometry (static)
 
-    /// The one and only window frame: top-center over the notch, never changes.
-    private func panelFrame() -> CGRect {
-        CGRect(x: screen.frame.midX - panelSize.width / 2,
-               y: screen.frame.maxY - panelSize.height,
-               width: panelSize.width, height: panelSize.height)
+    /// Top-center over the notch; the SwiftUI content is top-anchored, so only the bottom edge moves.
+    private func panelFrame(_ size: CGSize) -> CGRect {
+        CGRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height,
+               width: size.width, height: size.height)
+    }
+
+    /// Full size at once when the notch opens; the collapsed size once the close has settled.
+    private func fitWindow(for phase: NotchPhase) {
+        pendingShrink?.cancel(); pendingShrink = nil
+        if phase == .expanded || phase == .pinned || phase == .alert {
+            if panel.frame.height != panelSize.height { panel.setFrame(panelFrame(panelSize), display: true) }
+            return
+        }
+        let shrink = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.panel.setFrame(self.panelFrame(self.collapsedSize), display: true)
+            self.updateCursorTracking()
+        }
+        pendingShrink = shrink
+        DispatchQueue.main.asyncAfter(deadline: .now() + shrinkDelay, execute: shrink)
     }
 
     private func notchSize() -> CGSize {
@@ -190,6 +212,7 @@ final class NotchController: NSObject {
     // MARK: - Phase rendering
 
     private func applyPhase(_ phase: NotchPhase) {
+        fitWindow(for: phase)
         model.phase = phase
         model.footprint = currentFootprint()
         if phase == .hidden { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
@@ -255,13 +278,26 @@ final class NotchController: NSObject {
                       width: r.width, height: r.height)
     }
 
-    /// Poll the cursor: the tracking-area approach can't work here because the
-    /// window ignores mouse events while over passthrough regions (so it would
-    /// never receive mouseEntered). Reading `NSEvent.mouseLocation` is reliable
-    /// regardless. 60 Hz keeps click-through in sync before the user can click.
+    /// Track the cursor from mouse-move events: a tracking area can't work because the
+    /// window ignores mouse events over passthrough regions (so it would never get
+    /// mouseEntered). Mouse-move monitors need no permission and cost nothing while the
+    /// mouse is still. A slow poll catches the shape changing under a still cursor.
     private func startCursorTracking() {
-        let poll = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateCursorTracking() }
+        let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
+        moveMonitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: moves) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateCursorTracking() }
+            },
+            NSEvent.addLocalMonitorForEvents(matching: moves) { [weak self] event in
+                self?.updateCursorTracking(); return event
+            },
+        ].compactMap { $0 }
+        // ponytail: 5 Hz fallback; raise it if hover ever feels late after the panel resizes.
+        let poll = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.pollSuspended else { return }
+                self.updateCursorTracking()
+            }
         }
         RunLoop.main.add(poll, forMode: .common)
         cursorPoll = poll
@@ -269,8 +305,8 @@ final class NotchController: NSObject {
 
     private func updateCursorTracking() {
         let inside = interactiveScreenRect().contains(NSEvent.mouseLocation)
-        panel.ignoresMouseEvents = !inside
         guard inside != cursorInside else { return }
+        panel.ignoresMouseEvents = !inside  // a WindowServer call: only when it changes
         cursorInside = inside
         if Date() < settleUntil { return }  // settling after a Space switch: track, don't open
         if inside { cursorEntered() } else { cursorExited() }
@@ -407,11 +443,14 @@ final class NotchController: NSObject {
         cursorPoll?.invalidate()
         cursorPoll = nil
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        moveMonitors.forEach(NSEvent.removeMonitor)
+        moveMonitors = []
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
         localMonitor = nil
         globalMonitor = nil
         pendingHoverOut?.cancel()
         pendingHoverIn?.cancel()
+        pendingShrink?.cancel()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
         panel.orderOut(nil)
