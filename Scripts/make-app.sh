@@ -63,6 +63,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSCalendarsFullAccessUsageDescription</key><string>OpenNotch shows your upcoming events in the notch.</string>
 </dict>
 </plist>
 PLIST
