@@ -103,3 +103,13 @@ private func deltaLine(_ t: TokenCounts, id: String?, at: Date = t0) -> ParsedLo
     s.ingest(deltaLine(tokens(1), id: "n"), agent: .claude, fileKey: "g", pathIds: ("N", nil))
     #expect(s.sessions["N"]?.burn.window == 60)
 }
+
+// An interrupted turn (Esc, or the desktop app abandoning a session it relocated) is not "needs you".
+@MainActor @Test func interruptedSessionIsHidden() throws {
+    let line = #"{"type":"user","timestamp":"2026-11-25T07:53:36.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
+    let parsed = try #require(ClaudeLogParser.parse(line))
+    #expect(parsed.state == .idle)
+    let s = AgentSessions()
+    s.ingest(parsed, agent: .claude, fileKey: "f", pathIds: ("S", nil))
+    #expect(s.live(at: parsed.at!).isEmpty)
+}

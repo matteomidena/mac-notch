@@ -40,8 +40,11 @@ public enum CodexLogParser {
                 out.state = .working; out.detail = "Thinking"
             } else if ptype == "task_started" {
                 out.state = .working
-            } else if ptype == "task_complete" || ptype == "turn_aborted" {
-                out.state = .needsYou
+            } else if ptype == "task_complete" {
+                out.turnEnded = true
+                out.state = ClaudeLogParser.endsWithQuestion(payload["last_agent_message"] as? String ?? "") ? .needsYou : .idle
+            } else if ptype == "turn_aborted" {
+                out.state = .idle  // you stopped it
             }
         case "response_item":
             if ptype == "function_call" || ptype == "custom_tool_call" || ptype == "local_shell_call" {

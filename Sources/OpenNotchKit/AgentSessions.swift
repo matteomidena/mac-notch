@@ -38,7 +38,9 @@ public struct BurnRate: Equatable, Sendable {
     }
 }
 
-public enum SessionState: Sendable, Equatable { case working, needsYou }
+/// `idle`: nothing to do: the turn ended without a question, or the user stopped it (Esc, or the desktop
+/// app dropping a session it relocated). Hidden until it acts again.
+public enum SessionState: Sendable, Equatable { case working, needsYou, idle }
 
 public struct AgentSession: Identifiable, Equatable, Sendable {
     public let id: String
@@ -54,16 +56,24 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     public var weightedTotal: Double = 0
     public var burn: BurnRate
     public var activeMinutes: Int { activeMinuteSet.count }
+    /// Background tasks still running: a turn that ends on them is the agent waiting, not you.
+    public var openTasks: Set<String> = []
+    var backgroundDetail: String?
     fileprivate var activeMinuteSet: Set<Int> = []
 
     public func isLive(at now: Date) -> Bool { now.timeIntervalSince(lastActivity) <= 300 }
 
     // ponytail: a finished session counts as waiting for 30 min, then drops; no "dismiss" until asked for.
     public static let waitingTTL: TimeInterval = 1800
+    // ponytail: a background task we never see finish (session closed) keeps the row up to an hour.
+    public static let backgroundTTL: TimeInterval = 3600
     public var needsYou: Bool { state == .needsYou }
     /// Listed in the Agents tab: active in the last 5 min, or waiting on the user for up to `waitingTTL`.
     public func isShown(at now: Date) -> Bool {
-        isLive(at: now) || (needsYou && now.timeIntervalSince(lastActivity) <= Self.waitingTTL)
+        guard state != .idle else { return false }
+        let quiet = now.timeIntervalSince(lastActivity)
+        return isLive(at: now) || (needsYou && quiet <= Self.waitingTTL)
+            || (state == .working && !openTasks.isEmpty && quiet <= Self.backgroundTTL)
     }
     /// Session name, else the first prompt, else the project.
     public var displayTitle: String { title ?? firstPrompt ?? project }
@@ -130,11 +140,22 @@ public final class AgentSessions {
                                    burn: BurnRate(window: rateWindow))
             session.title = titles[key]
         }
+        if !childFiles.contains(fileKey) {
+            if let id = line.backgroundStarted { session.openTasks.insert(id); session.backgroundDetail = session.detail }
+            session.openTasks.subtract(line.backgroundEnded)
+        }
         // Only the main conversation decides whether it waits on you; a subagent finishing is not the turn ending.
-        if let state = line.state, !childFiles.contains(fileKey), at >= session.lastActivity {
+        if line.turnEnded, !childFiles.contains(fileKey), at >= session.lastActivity,
+           !session.openTasks.isEmpty || session.state == .needsYou {
+            // Waiting on its own background work: still running. Or it already asked you (wrap_up): keep that.
+            if !session.openTasks.isEmpty {
+                session.state = .working
+                session.detail = "Waiting: " + (session.backgroundDetail ?? "background task")
+            }
+        } else if let state = line.state, !childFiles.contains(fileKey), at >= session.lastActivity {
             session.state = state
             if state == .working || line.detail != nil { session.detail = line.detail ?? session.detail }
-            if state == .needsYou && line.detail == nil { session.detail = nil }
+            if state != .working && line.detail == nil { session.detail = nil }
         }
         if at > session.lastActivity { session.lastActivity = at }
         if session.project.isEmpty, let cwd = line.cwd, !cwd.isEmpty {
